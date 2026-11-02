@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Зельеварня</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Philosopher:wght@700&family=Manrope:wght@500;700;800&display=swap">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* Layout: one-screen merge game — status bar, three customer orders, 7×9 board, info line, storage and tools */
+:root {
+  --bg: #17121d;
+  --panel: #241b2c;
+  --panel-2: #2f2438;
+  --line: #3e3149;
+  --cell: #1e1725;
+  --text: #f3ebdf;
+  --muted: #a99bb3;
+  --gold: #f2c46d;
+  --gem: #6fd3ff;
+  --energy: #a6e36a;
+  --herb: #7bd389;
+  --crystal: #77b8ff;
+  --glass: #ffb35c;
+  --beast: #e58cff;
+  --danger: #ff6b7a;
+  --display: "Philosopher", Georgia, serif;
+  --body: "Manrope", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: radial-gradient(ellipse 120% 60% at 50% -10%, #3a2540 0%, var(--bg) 60%);
+  background-color: var(--bg);
+  color: var(--text); font-family: var(--body); font-size: 14px;
+  overflow: hidden; touch-action: none; -webkit-tap-highlight-color: transparent;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.app {
+  height: 100%; max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px;
+  padding: 8px max(10px, env(safe-area-inset-right, 0px)) 8px max(10px, env(safe-area-inset-left, 0px));
+}
+
+/* статус */
+.top { display: flex; align-items: center; gap: 6px; }
+.lvl { position: relative; width: 44px; height: 44px; flex: none; }
+.lvl svg { width: 44px; height: 44px; rotate: -90deg; }
+.lvl b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-size: 18px; color: var(--gold); }
+.pill {
+  flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; justify-content: center; gap: 5px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+#energyPill { flex: 1.3; }
+@media (max-width: 400px) { .top { gap: 5px; } .pill { font-size: 13px; gap: 3px; } }
+.pill small { color: var(--muted); font-weight: 700; font-size: 11px; }
+.pill.gems { border-color: color-mix(in srgb, var(--gem) 45%, var(--line)); }
+.pill .plus { width: 18px; height: 18px; border-radius: 50%; background: var(--gem); color: #08202c; display: grid; place-items: center; font-size: 14px; line-height: 1; }
+.pill.bump { animation: bump .45s cubic-bezier(.34,1.56,.64,1); }
+@keyframes bump { 40% { transform: scale(1.12); } }
+
+/* заказы */
+.orders { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.order {
+  position: relative; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 14px;
+  padding: 6px 6px 7px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 104px; min-width: 0;
+}
+.order.ready { border-color: var(--gold); box-shadow: 0 0 18px -4px rgba(242,196,109,.6); }
+.order .who { font-size: 22px; line-height: 1; }
+.order .name { font-size: 10.5px; color: var(--muted); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.needs { display: flex; gap: 3px; }
+.need { position: relative; width: 30px; height: 30px; border-radius: 9px; background: var(--cell); display: grid; place-items: center; font-size: 18px; }
+.need.ok::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: var(--energy); color: #142208; font-size: 10px; font-weight: 800; display: grid; place-items: center; }
+.order .reward { font-size: 11px; font-weight: 800; color: var(--gold); }
+.order .give { position: absolute; inset: auto 6px 6px; height: 26px; border-radius: 9px; background: var(--gold); color: #2a1c05; font-weight: 800; font-size: 12px; }
+.order.enter { animation: enter .5s cubic-bezier(.34,1.56,.64,1); }
+@keyframes enter { from { transform: translateY(-14px) scale(.9); opacity: 0; } }
+
+/* поле */
+.board-wrap { flex: 1; min-height: 0; display: grid; place-items: center; }
+.board {
+  --cs: min(calc((100vw - 20px - 18px) / 7), calc((100vh - 330px) / 9), 62px);
+  display: grid; grid-template-columns: repeat(7, var(--cs)); grid-auto-rows: var(--cs); gap: 3px;
+  padding: 6px; border-radius: 18px; background: #120d17; border: 1px solid var(--line);
+  box-shadow: inset 0 0 40px rgba(0,0,0,.5);
+}
+.cell { position: relative; border-radius: 10px; background: var(--cell); box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
+.cell.locked { background: repeating-linear-gradient(45deg, #15101a 0 6px, #19131f 6px 12px); display: grid; place-items: center; color: #5e5068; font-size: 10px; font-weight: 800; }
+.cell.target { box-shadow: inset 0 0 0 2px var(--gold); }
+.cell.merge-target { box-shadow: inset 0 0 0 2px var(--energy), 0 0 14px rgba(166,227,106,.5); }
+.item {
+  --c: var(--herb);
+  position: absolute; inset: 2px; border-radius: 9px; display: grid; place-items: center;
+  font-size: calc(var(--cs) * .56); line-height: 1;
+  background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--c) 34%, transparent), color-mix(in srgb, var(--c) 10%, #1e1725) 70%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 40%, transparent);
+  transition: transform .12s;
+}
+.item .lv { position: absolute; right: 3px; bottom: 2px; font-size: 9px; font-weight: 800; color: var(--text); opacity: .75; font-family: var(--body); }
+.item.l6, .item.l7 { box-shadow: inset 0 0 0 1.5px var(--c), 0 0 12px -2px var(--c); }
+.item.l8 { box-shadow: inset 0 0 0 2px var(--gold), 0 0 16px -2px var(--gold); }
+.item.gen {
+  background: radial-gradient(circle at 50% 35%, rgba(242,196,109,.35), #2b1f16 75%);
+  box-shadow: inset 0 0 0 2px #8a6630, 0 3px 0 #5c4220; font-size: calc(var(--cs) * .62);
+}
+.item.gen::after { content: "⚡"; position: absolute; top: 1px; right: 2px; font-size: 10px; }
+.item.bubble { border-radius: 50%; background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.35), rgba(111,211,255,.18) 45%, rgba(111,211,255,.05) 70%); box-shadow: inset 0 0 0 2px rgba(111,211,255,.7), 0 0 14px rgba(111,211,255,.4); animation: wobble 2s ease-in-out infinite; }
+.item.bubble .lv { right: auto; left: 50%; translate: -50% 0; bottom: -2px; background: var(--gem); color: #08202c; border-radius: 6px; padding: 0 4px; opacity: 1; }
+@keyframes wobble { 50% { transform: scale(1.05) rotate(3deg); } }
+.item.pop { animation: pop .35s cubic-bezier(.34,1.56,.64,1); }
+@keyframes pop { from { transform: scale(.3); } }
+.item.selected { transform: scale(1.06); box-shadow: inset 0 0 0 2px var(--text), 0 0 14px rgba(243,235,223,.4); }
+.cell.lifting .item { opacity: .25; }
+.ghost { position: fixed; z-index: 50; pointer-events: none; width: 64px; height: 64px; margin: -32px 0 0 -32px; font-size: 38px; display: grid; place-items: center; filter: drop-shadow(0 8px 10px rgba(0,0,0,.6)); scale: 1.15; }
+
+.info { min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.3; }
+.info b { color: var(--gold); }
+.info .act { margin-left: auto; flex: none; padding: 5px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); font-weight: 800; font-size: 12px; }
+
+/* низ: склад и инструменты */
+.bar { display: flex; align-items: stretch; gap: 6px; }
+.storage { flex: 1; display: flex; gap: 4px; padding: 5px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.slot { position: relative; width: 44px; height: 44px; flex: none; border-radius: 10px; background: var(--cell); display: grid; place-items: center; font-size: 26px; }
+.slot.empty::before { content: ""; width: 14px; height: 14px; border-radius: 4px; border: 1.5px dashed #5e5068; }
+.slot.target { box-shadow: inset 0 0 0 2px var(--gold); }
+.slot.add { color: var(--gem); font-size: 20px; font-weight: 800; background: transparent; border: 1.5px dashed color-mix(in srgb, var(--gem) 50%, transparent); }
+.tool { width: 50px; flex: none; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-size: 20px; position: relative; }
+.tool small { font-size: 9.5px; font-weight: 800; color: var(--muted); }
+.tool.target { box-shadow: inset 0 0 0 2px var(--danger); }
+.tool.ready::after { content: ""; position: absolute; top: 5px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.tool.active { border-color: var(--energy); box-shadow: 0 0 14px -3px var(--energy); }
+
+/* модальные окна */
+.modal-back { position: fixed; inset: 0; z-index: 40; background: rgba(8,5,12,.72); display: flex; align-items: flex-end; justify-content: center; animation: fade .2s; }
+@keyframes fade { from { opacity: 0; } }
+.modal {
+  width: min(520px, 100%); max-height: 88%; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-bottom: 0; border-radius: 22px 22px 0 0;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: flex; flex-direction: column; gap: 12px; animation: rise .4s cubic-bezier(.2,.9,.3,1.1);
+  touch-action: pan-y;
+}
+@keyframes rise { from { transform: translateY(40%); } }
+.modal h2 { margin: 0; font-family: var(--display); font-size: 24px; text-align: center; }
+.modal p { margin: 0; color: var(--muted); text-align: center; line-height: 1.45; }
+.big-icon { font-size: 64px; text-align: center; line-height: 1; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--panel); padding: 4px; border-radius: 12px; }
+.tabs button { padding: 9px; border-radius: 9px; font-weight: 800; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: var(--panel-2); color: var(--text); }
+.packs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pack { position: relative; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 16px; padding: 14px 10px 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.pack .gem-big { font-size: 34px; }
+.pack b { font-family: var(--display); font-size: 22px; color: var(--gem); }
+.pack .tag { position: absolute; top: -8px; right: 8px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 800; border-radius: 999px; padding: 2px 8px; }
+.pack.best { border-color: var(--gold); }
+.price { width: 100%; padding: 8px; border-radius: 10px; background: var(--gold); color: #2a1c05; font-weight: 800; }
+.starter { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; text-align: left; border-color: var(--gold); background: linear-gradient(110deg, #3b2a1a, var(--panel)); }
+.starter .price { width: auto; padding: 10px 16px; }
+.row { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.row .ico { font-size: 26px; width: 34px; text-align: center; }
+.row .txt { flex: 1; min-width: 0; }
+.row .txt b { display: block; font-size: 14px; }
+.row .txt small { color: var(--muted); font-size: 12px; }
+.row .buy { flex: none; padding: 8px 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-weight: 800; white-space: nowrap; }
+.row .buy:disabled { opacity: .45; }
+.btn { padding: 13px; border-radius: 14px; font-weight: 800; background: var(--panel); border: 1px solid var(--line); }
+.btn.primary { background: var(--gold); color: #2a1c05; border-color: var(--gold); }
+.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fine { font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.4; }
+.rewards { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.rewards span { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; font-weight: 800; }
+.chain { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; font-size: 22px; }
+.chain span { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: var(--panel); }
+
+.toast { position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); translate: -50% 0; z-index: 60; max-width: calc(100% - 32px); width: max-content; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 9px 14px; font-weight: 700; font-size: 13px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.5); animation: fade .2s; }
+#fx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 45; pointer-events: none; }
+.fly { position: fixed; z-index: 55; pointer-events: none; font-size: 26px; transition: transform .45s cubic-bezier(.5,0,.5,1), opacity .45s; }
+/* эффекты */
+#ambient { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.app { position: relative; z-index: 1; }
+.float { position: fixed; z-index: 56; pointer-events: none; font-weight: 800; font-size: 15px; color: var(--gold); text-shadow: 0 2px 6px rgba(0,0,0,.8); translate: -50% -50%; white-space: nowrap; animation: floatUp 1.1s ease-out forwards; }
+@keyframes floatUp { 0% { opacity: 0; transform: translateY(8px) scale(.6); } 15% { opacity: 1; transform: translateY(0) scale(1.15); } 100% { opacity: 0; transform: translateY(-52px) scale(1); } }
+.combo { position: fixed; left: 50%; top: 40%; z-index: 57; pointer-events: none; translate: -50% -50%; font-family: var(--display); font-size: 44px; color: var(--gold); white-space: nowrap;
+  text-shadow: 0 0 26px rgba(242,196,109,.85), 0 4px 0 #6b4a12; animation: comboIn 1s cubic-bezier(.34,1.56,.64,1) forwards; }
+.combo small { display: block; text-align: center; font-family: var(--body); font-size: 15px; color: var(--text); text-shadow: 0 2px 6px #000; }
+@keyframes comboIn { 0% { opacity: 0; transform: scale(.3) rotate(-10deg); } 22% { opacity: 1; transform: scale(1.18) rotate(3deg); } 70% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.92) translateY(-34px); } }
+.shake { animation: shake .38s; }
+@keyframes shake { 15% { translate: -6px 3px; } 35% { translate: 5px -4px; } 55% { translate: -4px 2px; } 75% { translate: 2px -1px; } }
+.item.squish { animation: squish .32s cubic-bezier(.34,1.56,.64,1); }
+@keyframes squish { 30% { transform: scale(1.2, .8); } 60% { transform: scale(.9, 1.1); } }
+.item.hint { animation: hintWiggle 1.1s ease-in-out infinite; }
+@keyframes hintWiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-9deg) scale(1.08); } 75% { transform: rotate(9deg) scale(1.08); } }
+.item.gift { --c: var(--gold); animation: giftBob 1.6s ease-in-out infinite; }
+@keyframes giftBob { 50% { transform: translateY(-3px) rotate(-4deg); } }
+.order.vip { border-color: var(--gold); background: linear-gradient(180deg, #4a3618, var(--panel)); box-shadow: 0 0 20px -6px rgba(242,196,109,.7); }
+.order .vip-tag { position: absolute; top: -8px; left: 50%; translate: -50% 0; font-size: 10px; font-weight: 800; background: var(--gold); color: #2a1c05; border-radius: 999px; padding: 1px 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.order.happy .who { animation: happy .7s cubic-bezier(.34,1.56,.64,1); }
+@keyframes happy { 35% { transform: scale(1.6) rotate(-12deg); } 65% { transform: scale(1.2) rotate(8deg); } }
+.discovery { position: fixed; left: 50%; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 58; translate: -50% 0; display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px;
+  background: linear-gradient(110deg, #3b2a46, #241b2c); border: 1px solid var(--gold); border-radius: 16px; box-shadow: 0 12px 30px rgba(0,0,0,.6), 0 0 24px -6px rgba(242,196,109,.7);
+  animation: discIn 2.6s cubic-bezier(.34,1.56,.64,1) forwards; white-space: nowrap; }
+.discovery .di { font-size: 30px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: radial-gradient(circle, rgba(242,196,109,.35), transparent 70%); }
+.discovery small { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; color: var(--gold); }
+.discovery b { font-size: 14px; }
+@keyframes discIn { 0% { opacity: 0; transform: translateY(-30px) scale(.8); } 12% { opacity: 1; transform: translateY(0) scale(1.05); } 18% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-16px); } }
+.rays-top { position: relative; height: 96px; display: grid; place-items: center; }
+.rays-top::before { content: ""; position: absolute; width: 260px; height: 260px; top: -82px; background: repeating-conic-gradient(rgba(242,196,109,.25) 0 10deg, transparent 10deg 24deg);
+  -webkit-mask: radial-gradient(circle, #000 0 20%, transparent 62%); mask: radial-gradient(circle, #000 0 20%, transparent 62%); animation: spin 12s linear infinite; }
+.rays-top .big-icon { position: relative; animation: popBig .7s cubic-bezier(.34,1.56,.64,1); }
+@keyframes spin { to { rotate: 360deg; } }
+@keyframes popBig { from { transform: scale(.2) rotate(-30deg); } }
+.book { display: flex; flex-direction: column; gap: 8px; }
+.book .chain span { position: relative; }
+.book .chain span.unknown { filter: grayscale(1) brightness(.18); }
+.quest { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.quest.done { border-color: var(--energy); }
+.quest .qh { display: flex; align-items: center; gap: 8px; }
+.quest .qh b { flex: 1; font-size: 13.5px; }
+.quest .qh span { font-weight: 800; color: var(--gold); white-space: nowrap; }
+.qbar { height: 7px; border-radius: 4px; background: var(--cell); overflow: hidden; }
+.qbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--energy), var(--gold)); border-radius: 4px; transition: width .4s; }
+.quest .claim { padding: 7px; border-radius: 10px; background: var(--energy); color: #142208; font-weight: 800; }
+/* колесо удачи */
+.wheel-box { position: relative; width: 280px; height: 280px; margin: 4px auto 0; }
+.wheel-box svg { width: 100%; height: 100%; transition: transform 4.2s cubic-bezier(.12,.62,.1,1); filter: drop-shadow(0 10px 20px rgba(0,0,0,.6)); }
+.wheel-pointer { position: absolute; left: 50%; top: -6px; translate: -50% 0; width: 0; height: 0; border: 16px solid transparent; border-top: 26px solid var(--gold); filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); z-index: 2; }
+.wheel-hub { position: absolute; inset: 0; margin: auto; width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff1c2, var(--gold) 50%, #8a6630); box-shadow: 0 0 0 4px #2a1c05; display: grid; place-items: center; font-size: 24px; }
+.odds { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.5; }
+/* зелья-помощники */
+.booster-hint { color: var(--gem); }
+.booster-badge { position: absolute; top: 3px; right: 4px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--gem); color: #08202c; font-size: 10px; font-weight: 800; display: grid; place-items: center; padding: 0 4px; }
+.cell.aim .item { box-shadow: inset 0 0 0 2px var(--gem), 0 0 14px rgba(111,211,255,.5); }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font-weight: 700; }
+.toggle i { width: 42px; height: 24px; border-radius: 12px; background: var(--cell); position: relative; transition: background .2s; }
+.toggle i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+.toggle[aria-pressed="true"] i { background: color-mix(in srgb, var(--energy) 40%, var(--cell)); }
+.toggle[aria-pressed="true"] i::after { transform: translateX(18px); background: var(--energy); }
+/* обустройство, календарь, достижения, рука-подсказка */
+.home-btn { width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); font-size: 18px; position: relative; }
+.ev-btn { border-color: #6c55a8; background: radial-gradient(circle at 50% 30%, #3b2d63, var(--panel)); }
+.ev-btn.ready { animation: evGlow 1.6s ease-in-out infinite; }
+@keyframes evGlow { 50% { box-shadow: 0 0 16px -2px #b59cff; } }
+.ev-btn.bump { animation: bump .45s cubic-bezier(.34,1.56,.64,1); }
+/* окно «Звездопада»: ночное небо с падающими звёздами */
+.ev-sky { position: relative; flex: none; height: 104px; margin: -4px 0 0; border-radius: 16px; overflow: hidden; display: grid; place-items: center;
+  background: radial-gradient(ellipse at 50% 120%, #4b2f7a 0%, #1d1433 60%, #120c1f 100%); border: 1px solid #3d2f5e; }
+.ev-sky::before { content: ""; position: absolute; inset: 0; background-image: radial-gradient(1px 1px at 12% 30%, #fff, transparent), radial-gradient(1px 1px at 28% 70%, #fff, transparent),
+  radial-gradient(1.5px 1.5px at 46% 22%, #fff, transparent), radial-gradient(1px 1px at 64% 58%, #fff, transparent), radial-gradient(1.5px 1.5px at 82% 28%, #fff, transparent), radial-gradient(1px 1px at 90% 76%, #fff, transparent);
+  animation: twinkle 2.4s ease-in-out infinite alternate; }
+@keyframes twinkle { to { opacity: .45; } }
+.ev-sky i { position: absolute; width: 90px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, #fff, transparent); rotate: -28deg; opacity: 0; animation: shoot 3.2s linear infinite; }
+.ev-sky i:nth-child(2) { top: 18%; left: 70%; animation-delay: .9s; }
+.ev-sky i:nth-child(3) { top: 8%; left: 40%; animation-delay: 2.1s; width: 60px; }
+.ev-sky i:nth-child(1) { top: 30%; left: 95%; }
+@keyframes shoot { 0% { opacity: 0; transform: translateX(0); } 6% { opacity: 1; } 30% { opacity: 0; transform: translateX(-260px); } 100% { opacity: 0; transform: translateX(-260px); } }
+.ev-sky b { position: relative; font-family: var(--display); font-size: 34px; color: #e6dcff; text-shadow: 0 0 18px #9d7bff; }
+.ev-sky small { position: absolute; bottom: 8px; font-size: 11.5px; font-weight: 800; color: #b9a8e6; }
+.evr { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px 10px; }
+.evr .n { width: 46px; flex: none; text-align: center; font-weight: 800; font-size: 12px; color: #c9b6ff; }
+.evr .r { flex: 1; font-weight: 800; }
+.evr .claim { padding: 7px 12px; border-radius: 10px; background: #b59cff; color: #1d1036; font-weight: 800; }
+.evr.got { opacity: .5; }
+.evr.can { border-color: #b59cff; box-shadow: 0 0 14px -6px #b59cff; }
+.evr small { color: var(--muted); font-weight: 700; white-space: nowrap; }
+.evbar { height: 9px; border-radius: 5px; background: var(--cell); overflow: hidden; }
+.evbar i { display: block; height: 100%; background: linear-gradient(90deg, #7f63ff, #e6dcff); border-radius: 5px; transition: width .5s; }
+.lb { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.lb b { width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
+.lb span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.lb i { font-style: normal; font-weight: 800; color: #c9b6ff; font-variant-numeric: tabular-nums; }
+.lb.me { border-color: #b59cff; background: linear-gradient(90deg, #2e2350, var(--panel)); }
+.invite { display: flex; flex-direction: column; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+.invite b { font-family: var(--display); font-size: 30px; color: var(--gem); }
+.lvl.ready::after, .home-btn.ready::after { content: ""; position: absolute; top: 1px; right: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.decor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.decor { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 16px; padding: 12px 10px 10px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 0; }
+.decor .di { font-size: 40px; line-height: 1; transition: filter .3s; }
+.decor .di.s0 { filter: grayscale(1) brightness(.4); }
+.decor .di.s3 { filter: drop-shadow(0 0 10px rgba(242,196,109,.8)); }
+.decor b { font-size: 13px; }
+.decor .stars { color: var(--gold); letter-spacing: 2px; font-size: 13px; }
+.decor small { color: var(--muted); font-size: 11px; line-height: 1.3; min-height: 28px; }
+.decor .buy { width: 100%; padding: 7px; border-radius: 10px; background: var(--gold); color: #2a1c05; font-weight: 800; }
+.decor .buy:disabled { background: var(--panel-2); color: var(--muted); }
+.decor.upgraded { animation: popBig .6s cubic-bezier(.34,1.56,.64,1); }
+.cal { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.cal div { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 4px; text-align: center; font-size: 11px; font-weight: 800; color: var(--muted); }
+.cal div b { display: block; font-size: 20px; margin: 2px 0; }
+.cal div.done { opacity: .5; }
+.cal div.done::after { content: "✓"; position: absolute; top: 2px; right: 6px; color: var(--energy); }
+.cal div.today { border-color: var(--gold); color: var(--text); box-shadow: 0 0 16px -4px rgba(242,196,109,.8); }
+.cal div.big { grid-column: span 2; }
+.ach { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.ach .ai { font-size: 26px; }
+.ach .at { flex: 1; min-width: 0; }
+.ach .at b { font-size: 13.5px; }
+.ach .at small { display: block; color: var(--muted); font-size: 11.5px; }
+.ach .tiers { color: var(--gold); font-size: 12px; letter-spacing: 1px; }
+.ach .claim { padding: 7px 10px; border-radius: 10px; background: var(--energy); color: #142208; font-weight: 800; white-space: nowrap; }
+#hand { position: fixed; z-index: 44; pointer-events: none; font-size: 40px; translate: -10px -6px; filter: drop-shadow(0 4px 6px rgba(0,0,0,.7)); }
+#hand.tap { animation: handTap 1.1s ease-in-out infinite; }
+#hand.drag { animation: handDrag 1.8s ease-in-out infinite; }
+@keyframes handTap { 0%, 100% { transform: translateY(0) scale(1); } 45% { transform: translateY(10px) scale(.88); } }
+@keyframes handDrag { 0% { transform: translate(0, 0); opacity: 0; } 15% { opacity: 1; transform: translate(0, 6px) scale(.9); } 70% { transform: translate(var(--dx), calc(var(--dy) + 6px)) scale(.9); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <button class="lvl" id="lvlBtn" aria-label="Уровень">
+      <svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="#241b2c" stroke="#3e3149" stroke-width="4"/><circle id="xpRing" cx="22" cy="22" r="19" fill="none" stroke="#f2c46d" stroke-width="4" stroke-linecap="round" stroke-dasharray="119.4" stroke-dashoffset="119.4"/></svg>
+      <b id="lvlNum">1</b>
+    </button>
+    <button class="home-btn" id="homeBtn" aria-label="Обустройство лавки">🏠</button>
+    <button class="home-btn ev-btn" id="eventBtn" aria-label="Звездопад">🌟</button>
+    <div class="pill" id="energyPill">⚡ <span id="energyVal">100</span><small id="energyTimer"></small></div>
+    <div class="pill" id="coinsPill">🪙 <span id="coinsVal">0</span></div>
+    <button class="pill gems" id="gemsPill">💎 <span id="gemsVal">0</span><span class="plus">+</span></button>
+  </header>
+  <section class="orders" id="orders"></section>
+  <section class="board-wrap"><div class="board" id="board"></div></section>
+  <div class="info" id="info"></div>
+  <footer class="bar">
+    <div class="storage" id="storage"></div>
+    <button class="tool" id="questBtn">📜<small>Задания</small></button>
+    <button class="tool" id="sellBin">🗑️<small>Продать</small></button>
+    <button class="tool" id="boostBtn">🧪<small>Зелья</small><span class="booster-badge" id="boosterBadge" hidden></span></button>
+    <button class="tool" id="giftBtn">🎡<small>Колесо</small></button>
+  </footer>
+</div>
+<div class="modal-back" id="modalBack" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" hidden></div>
+<canvas id="fx"></canvas>
+<canvas id="ambient"></canvas>
+<div id="hand" hidden>👆</div>
+
+<script>
+/* ---------- Настройки ---------- */
+const API = '';                       // адрес сервера на Cloudflare Workers; пусто — игра работает без покупок
+const TG = window.Telegram?.WebApp?.initData ? window.Telegram.WebApp : null;
+const DEMO = !API && new URLSearchParams(location.search).has('demo'); // ?demo — пробные покупки без денег
+if (TG) {
+  TG.ready(); TG.expand();
+  try { TG.setHeaderColor('#17121d'); TG.setBackgroundColor('#17121d'); TG.disableVerticalSwipes?.(); } catch (e) {}
+}
+
+const COLS = 7, ROWS = 9;
+const CHAINS = {
+  herb:  { name: 'Травы',     gen: 'Сад',   genIcon: '🌳', color: 'var(--herb)',
+           icons: ['🌱', '🌿', '☘️', '🍀', '🌾', '🌷', '🌹', '💐'],
+           names: ['Росток', 'Трава', 'Трилистник', 'Клевер', 'Сноп', 'Тюльпан', 'Роза', 'Букет'] },
+  crystal: { name: 'Кристаллы', gen: 'Шахта', genIcon: '⛏️', color: 'var(--crystal)',
+           icons: ['🔸', '🔶', '🔹', '🔷', '💠', '💎', '🔮', '👑'],
+           names: ['Осколок', 'Самоцвет', 'Льдинка', 'Сапфир', 'Кристалл', 'Алмаз', 'Шар судьбы', 'Корона'] },
+  glass: { name: 'Стекло',    gen: 'Горн',  genIcon: '🔥', color: 'var(--glass)',
+           icons: ['💧', '🥛', '🧪', '⚗️', '🍶', '🏺', '🏆', '✨'],
+           names: ['Капля', 'Стакан', 'Пробирка', 'Колба', 'Кувшин', 'Амфора', 'Кубок', 'Эликсир'] },
+};
+CHAINS.beast = { name: 'Фамильяры', gen: 'Гнездо', genIcon: '🧺', color: 'var(--beast)',
+  icons: ['🥚', '🐣', '🐥', '🐦', '🦜', '🦉', '🦅', '🐉'],
+  names: ['Яйцо', 'Вылупление', 'Птенец', 'Пташка', 'Попугай', 'Сова', 'Орёл', 'Дракон'] };
+const CHAIN_ORDER = ['herb', 'crystal', 'glass', 'beast'];
+const GEN_UNLOCK = { herb: 1, crystal: 2, glass: 4, beast: 6 };     // уровень игрока, на котором появляется генератор
+const ROW_UNLOCK = [1, 1, 1, 1, 1, 1, 3, 5, 7];           // уровень, с которого открыт ряд
+const MAX_E_BASE = 100, E_REGEN_BASE = 90;                          // энергия: максимум и секунд на 1 единицу
+const CUSTOMERS = [['🧙', 'Маг Аркадий'], ['🧝', 'Эльфийка Лира'], ['🧛', 'Граф Влад'], ['🧚', 'Фея Мира'], ['🧞', 'Джинн Али'], ['🦉', 'Сова Тиса'], ['🐉', 'Дракон Ржавчик'], ['🧜', 'Русалка Нея']];
+// пакеты кристаллов за Telegram Stars: цены и количество должны совпадать с сервером
+const PACKS = [
+  { id: 'p1', gems: 80, stars: 50 },
+  { id: 'p2', gems: 260, stars: 150, tag: '+8%' },
+  { id: 'p3', gems: 900, stars: 500, tag: '+12%' },
+  { id: 'p4', gems: 2000, stars: 1000, tag: '+25%', best: true },
+];
+const STARTER = { id: 'starter', gems: 250, energy: 200, stars: 99 };
+const PRICES = { energy100: 10, row: 25, slot: 15, luck: 20, energy25Coins: 250, chestCoins: 150, dust: 15, mirror: 20, broom: 25, spin: 10 };
+
+/* ---------- Обустройство лавки: 8 предметов по 3 ступени, каждая даёт постоянный бонус ---------- */
+const DECOR = [
+  { id: 'candles', icon: '🕯️', name: 'Свечи', perk: s => `заказы +${s * 5}% монет` },
+  { id: 'lanterns', icon: '🏮', name: 'Фонари', perk: s => `энергия: максимум +${s * 10}` },
+  { id: 'shelves', icon: '📚', name: 'Книжные полки', perk: s => `опыт +${s * 5}%` },
+  { id: 'still', icon: '⚗️', name: 'Перегонный куб', perk: s => `генераторы: +${s * 3}% к шансу 2 ур.` },
+  { id: 'telescope', icon: '🔭', name: 'Телескоп', perk: s => `пузыри живут +${s * 20} с` },
+  { id: 'map', icon: '🗺️', name: 'Звёздная карта', perk: s => `VIP-заказы +${s} 💎` },
+  { id: 'cat', icon: '🐈', name: 'Кот лавки', perk: s => `подарки: +${s}% шанс` },
+  { id: 'clock', icon: '🕰️', name: 'Часы', perk: s => `энергия на ${s * 10} с быстрее` },
+];
+const decorCost = (k, stage) => Math.round([120, 350, 900][stage] * (1 + k * .35) / 10) * 10;
+const dl = id => (S.decor && S.decor[id]) || 0;
+const maxE = () => MAX_E_BASE + dl('lanterns') * 10;
+const regenSec = () => E_REGEN_BASE - dl('clock') * 10;
+
+/* ---------- Состояние ---------- */
+const STORE = 'zelie-v1';
+const $ = id => document.getElementById(id);
+const ri = n => Math.floor(Math.random() * n);
+const fmt = n => Math.round(n).toLocaleString('ru-RU');
+const today = () => new Date().toISOString().slice(0, 10);
+const val = l => 2 ** (l - 1) * 2;                        // цена предмета в монетах
+const xpNeed = L => 10 * L * (L + 1);
+
+function freshState() {
+  const board = Array(COLS * ROWS).fill(null);
+  board[3 * COLS + 3] = { gen: 'herb' };
+  [[2, 2], [2, 4], [4, 2], [4, 4]].forEach(([r, c]) => { board[r * COLS + c] = { c: 'herb', l: 1 }; });
+  return { v: 1, t: 0, board, coins: 50, gems: 15, energy: MAX_E_BASE, eT: Date.now(), xp: 0, level: 1, orders: [],
+    storage: [null, null, null, null], rowsBought: [], luckUntil: 0, giftDay: '', seenGems: 0, seenEnergy: 0,
+    starter: false, tut: 0, merges: 0, nextOrderId: 1, found: { herb1: 1 }, ordersDone: 0, quests: null,
+    boosters: { dust: 1, mirror: 1, broom: 1 }, wheelDay: '', settings: { sound: true, music: true, haptic: true },
+    decor: {}, login: { last: '', streak: 0, claimed: true }, ach: {}, vipDone: 0, ev: null, invites: 0 };
+}
+let S;
+try { S = Object.assign(freshState(), JSON.parse(localStorage.getItem(STORE) || 'null') || {}); } catch (e) { S = freshState(); }
+let saveTimer;
+function save() {
+  S.t = Date.now();
+  try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {}
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(cloudSave, 4000);
+}
+
+/* ---------- Сервер ---------- */
+async function api(path, body = {}) {
+  if (!API || !TG) return null;
+  try {
+    const r = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: TG.initData, ...body }), keepalive: true });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+function cloudSave() { api('/api/save', { state: S }); }
+// покупки начисляет сервер: здесь добавляется только разница с тем, что уже видели
+function applyCredits(r) {
+  if (!r) return false;
+  const dg = (r.credited || 0) - S.seenGems, de = (r.creditedEnergy || 0) - S.seenEnergy;
+  if (r.starter) S.starter = true;
+  if (dg <= 0 && de <= 0) return false;
+  S.gems += dg; S.energy += de; S.seenGems = r.credited || 0; S.seenEnergy = r.creditedEnergy || 0;
+  save(); renderTop(true);
+  toast(`Начислено: ${dg > 0 ? `💎 ${dg}` : ''}${de > 0 ? ` ⚡ ${de}` : ''}`);
+  burst(innerWidth / 2, innerHeight / 3, '#6fd3ff', 50);
+  return true;
+}
+async function cloudLoad() {
+  const r = await api('/api/load');
+  if (!r) return;
+  if (r.state && (r.state.t || 0) > (S.t || 0)) { S = Object.assign(freshState(), r.state); }
+  S.invites = r.invites || 0;
+  applyCredits(r);
+  renderAll();
+  if (ensureEvent().stars) sendScore();
+}
+
+/* ---------- Звук и вибрация ---------- */
+let ac;
+function beep(f, d, v = .05, type = 'triangle', delay = 0, to) {
+  if (!S.settings?.sound) return;
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t); if (to) o.frequency.exponentialRampToValueAtTime(to, t + d);
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02);
+  } catch (e) {}
+}
+const HAPTIC = TG?.isVersionAtLeast?.('6.1') ? TG.HapticFeedback : null;
+function buzz(kind) { try { if (!HAPTIC || !S.settings?.haptic) return; kind === 'success' ? HAPTIC.notificationOccurred('success') : kind === 'error' ? HAPTIC.notificationOccurred('error') : HAPTIC.impactOccurred(kind); } catch (e) {} }
+
+// тихая музыка лавки: пентатоника, мягкие ноты с долгим затуханием
+let musicTimer = null;
+function musicTick() {
+  if (!S.settings.music || document.hidden || !ac) return;
+  const scale = [196, 220, 262, 294, 330, 392, 440, 523];
+  const t = ac.currentTime, n = scale[ri(scale.length)];
+  [[n, .028, 0], [n * 1.5, .012, .02]].forEach(([f, v, dl]) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0, t + dl); g.gain.linearRampToValueAtTime(v, t + dl + .3); g.gain.exponentialRampToValueAtTime(.0001, t + dl + 3.2);
+    o.connect(g).connect(ac.destination); o.start(t + dl); o.stop(t + dl + 3.3);
+  });
+  if (Math.random() < .35) { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = n / 2;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.03, t + .6); g.gain.exponentialRampToValueAtTime(.0001, t + 4); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 4.1); }
+}
+function startMusic() {
+  if (musicTimer || !S.settings.music) return;
+  try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume(); } catch (e) { return; }
+  musicTimer = setInterval(musicTick, 900);
+}
+function stopMusic() { clearInterval(musicTimer); musicTimer = null; }
+
+/* ---------- Частицы ---------- */
+const fx = $('fx'), g2 = fx.getContext('2d');
+let parts = [], fxOn = false;
+function fitFx() { const d = Math.min(2, devicePixelRatio || 1); fx.width = innerWidth * d; fx.height = innerHeight * d; g2.setTransform(d, 0, 0, d, 0, 0); }
+fitFx(); addEventListener('resize', fitFx);
+function burst(x, y, color, n = 18) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, s = 1.5 + Math.random() * 4; parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1, life: 1, color, r: 1.5 + Math.random() * 2.5, star: Math.random() < .35 }); }
+  if (!fxOn) { fxOn = true; requestAnimationFrame(fxLoop); }
+}
+function ring(x, y, color, max = 70) {
+  parts.push({ ring: true, x, y, r: 6, max, life: 1, color });
+  if (!fxOn) { fxOn = true; requestAnimationFrame(fxLoop); }
+}
+function fxLoop() {
+  g2.clearRect(0, 0, innerWidth, innerHeight);
+  parts = parts.filter(p => p.life > 0);
+  for (const p of parts) {
+    if (p.ring) {   // ударная волна слияния
+      p.r += (p.max - p.r) * .14; p.life -= .045;
+      g2.globalAlpha = Math.max(0, p.life); g2.strokeStyle = p.color; g2.lineWidth = 4 * p.life + 1;
+      g2.beginPath(); g2.arc(p.x, p.y, p.r, 0, 6.28); g2.stroke(); continue;
+    }
+    p.x += p.vx; p.y += p.vy; p.vy += .08; p.vx *= .97; p.life -= .025;
+    g2.globalAlpha = Math.max(0, p.life); g2.fillStyle = p.color;
+    if (p.star) {   // искра-звёздочка
+      g2.save(); g2.translate(p.x, p.y); g2.rotate(p.life * 6); g2.fillRect(-p.r * 1.6, -p.r * .35, p.r * 3.2, p.r * .7); g2.fillRect(-p.r * .35, -p.r * 1.6, p.r * .7, p.r * 3.2); g2.restore();
+    } else { g2.beginPath(); g2.arc(p.x, p.y, p.r, 0, 6.28); g2.fill(); }
+  }
+  g2.globalAlpha = 1;
+  if (parts.length) requestAnimationFrame(fxLoop); else fxOn = false;
+}
+// всплывающая надпись над точкой экрана
+function floatText(x, y, text, color) {
+  const el = document.createElement('div'); el.className = 'float'; el.textContent = text;
+  el.style.left = x + 'px'; el.style.top = y + 'px'; if (color) el.style.color = color;
+  document.body.append(el); setTimeout(() => el.remove(), 1150);
+}
+const center = el => { const r = el?.getBoundingClientRect(); return r ? [r.left + r.width / 2, r.top + r.height / 2] : [innerWidth / 2, innerHeight / 2]; };
+function shakeScreen() { const a = $('app'); a.classList.remove('shake'); void a.offsetWidth; a.classList.add('shake'); }
+function showCombo(text, sub) {
+  const el = document.createElement('div'); el.className = 'combo'; el.innerHTML = `${text}${sub ? `<small>${sub}</small>` : ''}`;
+  document.body.append(el); setTimeout(() => el.remove(), 1000);
+}
+// летят несколько монет в счётчик
+function coinRain(fromEl, n = 6, icon = '🪙', to = 'coinsPill') {
+  for (let k = 0; k < n; k++) setTimeout(() => flyTo(icon, fromEl, $(to)), k * 60);
+  setTimeout(() => { const p = $(to); p.classList.remove('bump'); void p.offsetWidth; p.classList.add('bump'); beep(1500 + Math.random() * 300, .06, .03); }, 450);
+}
+// светлячки и пылинки в лавке: тихий фон, рисуется ~30 раз в секунду
+(() => {
+  const cv = $('ambient'), g = cv.getContext('2d');
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const flies = Array.from({ length: 22 }, () => ({ x: Math.random(), y: Math.random(), a: Math.random() * 6.28, s: .0004 + Math.random() * .0007, ph: Math.random() * 6.28, c: Math.random() < .5 ? '242,196,109' : '123,211,137' }));
+  let last = 0, shoot = null, nextShoot = 5000;
+  const fit = () => { const d = Math.min(2, devicePixelRatio || 1); cv.width = innerWidth * d; cv.height = innerHeight * d; g.setTransform(d, 0, 0, d, 0, 0); };
+  fit(); addEventListener('resize', fit);
+  (function loop(t) {
+    requestAnimationFrame(loop);
+    if (t - last < 33 || document.hidden) return; last = t;
+    g.clearRect(0, 0, innerWidth, innerHeight);
+    for (const f of flies) {
+      f.a += (Math.random() - .5) * .3; f.x += Math.cos(f.a) * f.s; f.y += Math.sin(f.a) * f.s - .0002;
+      if (f.y < -.05) f.y = 1.05; if (f.x < -.05) f.x = 1.05; if (f.x > 1.05) f.x = -.05; if (f.y > 1.05) f.y = -.05;
+      const al = .25 + .25 * Math.sin(t / 600 + f.ph), x = f.x * innerWidth, y = f.y * innerHeight;
+      const gr = g.createRadialGradient(x, y, 0, x, y, 10); gr.addColorStop(0, `rgba(${f.c},${al})`); gr.addColorStop(1, `rgba(${f.c},0)`);
+      g.fillStyle = gr; g.beginPath(); g.arc(x, y, 10, 0, 6.28); g.fill();
+    }
+    if (!shoot && t > nextShoot) shoot = { x: innerWidth * (.4 + Math.random() * .6), y: innerHeight * Math.random() * .3, t0: t };
+    if (shoot) {
+      const k = (t - shoot.t0) / 900, x = shoot.x - k * 260, y = shoot.y + k * 140;
+      if (k >= 1) { shoot = null; nextShoot = t + 7000 + Math.random() * 8000; }
+      else {
+        const gr = g.createLinearGradient(x, y, x + 70, y - 38); gr.addColorStop(0, `rgba(255,255,255,${.8 * Math.sin(k * 3.14)})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g.strokeStyle = gr; g.lineWidth = 2; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 70, y - 38); g.stroke();
+      }
+    }
+  })(0);
+})();
+
+function flyTo(icon, fromEl, toEl) {
+  if (!fromEl || !toEl) return;
+  const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+  const el = document.createElement('div'); el.className = 'fly'; el.textContent = icon;
+  el.style.left = a.left + a.width / 2 - 13 + 'px'; el.style.top = a.top + a.height / 2 - 13 + 'px';
+  document.body.append(el);
+  requestAnimationFrame(() => { el.style.transform = `translate(${b.left + b.width / 2 - a.left - a.width / 2}px, ${b.top + b.height / 2 - a.top - a.height / 2}px) scale(.6)`; el.style.opacity = '.3'; });
+  setTimeout(() => el.remove(), 480);
+}
+
+/* ---------- Энергия и правила поля ---------- */
+function tickEnergy() {
+  const now = Date.now();
+  if (S.energy >= maxE()) { S.eT = now; return; }
+  const gained = Math.floor((now - S.eT) / (regenSec() * 1000));
+  if (gained > 0) { S.energy = Math.min(maxE(), S.energy + gained); S.eT += gained * regenSec() * 1000; if (S.energy >= maxE()) S.eT = now; }
+}
+const rowOf = i => Math.floor(i / COLS);
+const locked = i => S.level < ROW_UNLOCK[rowOf(i)] && !S.rowsBought.includes(rowOf(i));
+const itemIcon = it => it.gift ? '🎁' : it.gen ? CHAINS[it.gen].genIcon : CHAINS[it.c].icons[it.l - 1];
+const itemName = it => it.gift ? 'Подарок' : it.gen ? CHAINS[it.gen].gen : CHAINS[it.c].names[it.l - 1];
+const canMerge = (a, b) => a && b && !a.gen && !b.gen && !a.gift && !b.gift && !a.bubble && !b.bubble && a.c === b.c && a.l === b.l && a.l < 8;
+// ближайшая к клетке свободная открытая клетка
+function nearestEmpty(from) {
+  const fr = rowOf(from), fc = from % COLS;
+  let best = -1, bd = 1e9;
+  S.board.forEach((it, i) => {
+    if (it || locked(i)) return;
+    const d = (rowOf(i) - fr) ** 2 + (i % COLS - fc) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+/* ---------- Заказы ---------- */
+function makeOrder() {
+  const chains = CHAIN_ORDER.filter(c => S.level >= GEN_UNLOCK[c]);
+  const n = S.level < 2 ? 1 : S.level < 5 ? 1 + ri(2) : 1 + ri(3);
+  const maxL = Math.min(8, 2 + Math.floor(S.level * .8));
+  const needs = Array.from({ length: n }, () => ({ c: chains[ri(chains.length)], l: Math.min(maxL, 2 + ri(Math.max(1, maxL - 1))) }));
+  const who = ri(CUSTOMERS.length);
+  const o = { id: S.nextOrderId++, who, needs, coins: Math.round(needs.reduce((s, x) => s + val(x.l), 0) * 1.6), xp: needs.reduce((s, x) => s + x.l * 3, 0), fresh: true };
+  // каждый пятый заказ — VIP: сложнее, дороже, с кристаллами и таймером
+  if (S.level >= 2 && (o.id % 5 === 0)) {
+    o.needs.forEach(x => { x.l = Math.min(8, x.l + 1); });
+    o.vip = Date.now() + 4 * 60000; o.gems = 3 + ri(3);
+    o.coins = Math.round(o.needs.reduce((s, x) => s + val(x.l), 0) * 3); o.xp = o.needs.reduce((s, x) => s + x.l * 5, 0);
+  }
+  return o;
+}
+function fillOrders() { while (S.orders.length < 3) S.orders.push(makeOrder()); }
+// какие клетки поля закрывают заказ (без пузырей); null — заказ пока не собрать
+function orderCells(o) {
+  const used = new Set(), cells = [];
+  for (const need of o.needs) {
+    const i = S.board.findIndex((it, k) => it && !it.gen && !it.bubble && it.c === need.c && it.l === need.l && !used.has(k));
+    if (i < 0) return null;
+    used.add(i); cells.push(i);
+  }
+  return cells;
+}
+function needHave(o) {
+  const used = new Set();
+  return o.needs.map(need => {
+    const i = S.board.findIndex((it, k) => it && !it.gen && !it.bubble && it.c === need.c && it.l === need.l && !used.has(k));
+    if (i >= 0) used.add(i);
+    return i >= 0;
+  });
+}
+function deliver(id) {
+  const k = S.orders.findIndex(o => o.id === id), o = S.orders[k];
+  const cells = o && orderCells(o);
+  if (!cells) return;
+  const orderEl = document.querySelector(`[data-order="${id}"]`);
+  cells.forEach(i => { flyTo(itemIcon(S.board[i]), cellEl(i), orderEl); S.board[i] = null; });
+  const coins = Math.round(o.coins * (1 + dl('candles') * .05)), xp = Math.round(o.xp * (1 + dl('shelves') * .05)), gems = (o.gems || 0) + (o.vip ? dl('map') : 0);
+  S.coins += coins; S.xp += xp; S.gems += gems; S.ordersDone++; if (o.vip) S.vipDone = (S.vipDone || 0) + 1;
+  S.orders.splice(k, 1);
+  quest('order'); if (o.vip) quest('vip');
+  addStars(o.vip ? 8 : 3, ...center(orderEl).map((v, k) => k ? v + 30 : v));
+  beep(880, .12, .06); beep(1320, .2, .05, 'triangle', .08); beep(1760, .25, .04, 'triangle', .18); buzz('success');
+  orderEl?.classList.add('happy');
+  const [ox, oy] = center(orderEl);
+  burst(ox, oy, '#f2c46d', o.vip ? 50 : 30); ring(ox, oy, '#f2c46d', 80);
+  floatText(ox, oy - 10, `+${coins} 🪙  +${xp} ✨${gems ? `  +${gems} 💎` : ''}`);
+  setTimeout(() => floatText(ox, oy - 36, ['Спасибо! 💛', 'Чудесно!', 'То, что нужно!', 'Вы волшебник!', 'Приду ещё!'][ri(5)], '#f3ebdf'), 250);
+  coinRain(orderEl, o.vip ? 10 : 6);
+  if (o.gems) coinRain(orderEl, 3, '💎', 'gemsPill');
+  if (S.tut === 2) { S.tut = 3; setTimeout(checkLogin, 1800); }
+  setTimeout(() => { fillOrders(); save(); renderOrders(); }, 650);
+  checkLevel(); save(); renderTop(); renderBoard(); renderStorage(); renderInfo();
+}
+
+/* ---------- Уровни ---------- */
+function checkLevel() {
+  let ups = 0;
+  while (S.xp >= xpNeed(S.level)) { S.xp -= xpNeed(S.level); S.level++; ups++; }
+  if (!ups) return;
+  S.gems += 5 * ups; S.energy = Math.max(S.energy, maxE());
+  const unlocked = placeGenerators();
+  ROW_UNLOCK.forEach((L, r) => { if (L === S.level) unlocked.push('🔓 новый ряд поля'); });
+  save();
+  setTimeout(() => {
+    beep(523, .3, .06); beep(659, .3, .06, 'triangle', .1); beep(784, .4, .06, 'triangle', .2); beep(1047, .6, .06, 'triangle', .32); buzz('success');
+    ['#f2c46d', '#7bd389', '#77b8ff', '#ffb35c'].forEach((c, k) => setTimeout(() => burst(innerWidth * (.2 + .2 * k), innerHeight * .35, c, 40), k * 120));
+    shakeScreen();
+    openModal(`<div class="rays-top"><div class="big-icon">🏅</div></div><h2>Уровень ${S.level}!</h2>
+      <div class="rewards"><span>💎 +${5 * ups}</span><span>⚡ энергия полная</span>${unlocked.map(u => `<span>${u}</span>`).join('')}</div>
+      <p>Новые заказы будут сложнее и дороже.</p><button class="btn primary" data-close>Отлично</button>`);
+  }, 350);
+}
+
+// зелья-помощники: пыль поднимает уровень, зеркало копирует, метла сливает все пары
+const BOOSTERS = {
+  dust: { icon: '✨', name: 'Пыль улучшения', desc: 'Поднимает предмет на 1 уровень', aim: 'Нажмите на предмет, чтобы улучшить его' },
+  mirror: { icon: '🪞', name: 'Зеркало', desc: 'Создаёт копию предмета до 6 уровня', aim: 'Нажмите на предмет, чтобы скопировать его' },
+  broom: { icon: '🧹', name: 'Метла', desc: 'Сама объединяет все пары на поле', aim: '' },
+};
+let aiming = null;
+function useBooster(kind) {
+  if (!S.boosters[kind]) { buyBooster(kind); return; }
+  closeModal();
+  if (kind === 'broom') {
+    S.boosters.broom--; save(); renderTop();
+    showCombo('🧹 МЕТЛА', 'всё объединяется само');
+    let n = 0;
+    (function sweep() {
+      for (let a = 0; a < S.board.length; a++) {
+        if (!S.board[a] || locked(a)) continue;
+        const b = S.board.findIndex((it, k) => k !== a && !locked(k) && canMerge(S.board[a], it));
+        if (b >= 0) { flyTo(itemIcon(S.board[a]), cellEl(a), cellEl(b)); merge(a, b); if (++n < 40) setTimeout(sweep, 170); return; }
+      }
+      if (!n) toast('Пар для объединения нет');
+    })();
+    return;
+  }
+  aiming = kind; selected = -1; renderBoard(); renderInfo();
+}
+function applyBooster(i) {
+  const it = S.board[i], kind = aiming;
+  if (!it || it.gen || it.gift || it.bubble) { toast('Выберите обычный предмет'); return; }
+  if (kind === 'dust' && it.l >= 8) { toast('Это уже максимальный уровень'); return; }
+  if (kind === 'mirror' && it.l > 6) { toast('Зеркало копирует предметы до 6 уровня'); return; }
+  const [x, y] = center(cellEl(i));
+  if (kind === 'dust') {
+    S.board[i] = { c: it.c, l: it.l + 1, isNew: true };
+    discover(it.c, it.l + 1); if (it.l + 1 >= 5) quest('high');
+    floatText(x, y - 16, `✨ ${CHAINS[it.c].names[it.l]}`, '#6fd3ff');
+  } else {
+    const to = nearestEmpty(i);
+    if (to < 0) { toast('Нет свободной клетки для копии'); return; }
+    S.board[to] = { c: it.c, l: it.l, isNew: true };
+    flyTo(itemIcon(it), cellEl(i), cellEl(to));
+    floatText(x, y - 16, '🪞 копия', '#6fd3ff');
+  }
+  S.boosters[kind]--; aiming = null;
+  burst(x, y, '#6fd3ff', 36); ring(x, y, '#6fd3ff', 90); beep(880, .15, .05, 'sine', 0, 1760); buzz('medium');
+  save(); renderAll();
+}
+function buyBooster(kind) {
+  spendGems(PRICES[kind], () => { S.boosters[kind]++; toast(`${BOOSTERS[kind].icon} ${BOOSTERS[kind].name} +1`); });
+  if (!$('modalBack').hidden) boosterModal();
+}
+function boosterModal() {
+  openModal(`<div class="big-icon">🧪</div><h2>Зелья-помощники</h2>
+    ${Object.entries(BOOSTERS).map(([k, b]) => `<div class="row"><div class="ico">${b.icon}</div><div class="txt"><b>${b.name} · ${S.boosters[k]} шт.</b><small>${b.desc}</small></div>
+      ${S.boosters[k] ? `<button class="buy" data-use="${k}">Применить</button>` : `<button class="buy" data-bbuy="${k}">💎 ${PRICES[k]}</button>`}</div>`).join('')}
+    <p class="fine">Зелья можно получить на колесе удачи или купить за кристаллы.</p><button class="btn" data-close>Закрыть</button>`);
+  $('modal').querySelectorAll('[data-use]').forEach(b => b.onclick = () => useBooster(b.dataset.use));
+  $('modal').querySelectorAll('[data-bbuy]').forEach(b => b.onclick = () => buyBooster(b.dataset.bbuy));
+}
+
+// первое создание предмета — открытие; с 3 уровня награда кристаллами
+function discover(c, l) {
+  const k = c + l;
+  if (S.found[k]) return;
+  S.found[k] = 1;
+  const gems = l >= 3 ? l - 2 : 0;
+  S.gems += gems;
+  const el = document.createElement('div'); el.className = 'discovery';
+  el.innerHTML = `<div class="di">${CHAINS[c].icons[l - 1]}</div><div><small>НОВОЕ ОТКРЫТИЕ</small><b>${CHAINS[c].names[l - 1]}</b>${gems ? ` <span style="color:var(--gem);font-weight:800">+${gems} 💎</span>` : ''}</div>`;
+  document.querySelectorAll('.discovery').forEach(x => x.remove());
+  document.body.append(el); setTimeout(() => el.remove(), 2600);
+  beep(1047, .15, .05, 'sine'); beep(1568, .3, .04, 'sine', .1);
+}
+
+// ставит открытые по уровню генераторы; если поле занято, попробует снова позже
+function placeGenerators() {
+  const placed = [];
+  CHAIN_ORDER.forEach(c => {
+    if (S.level >= GEN_UNLOCK[c] && !S.board.some(it => it?.gen === c)) {
+      const i = nearestEmpty(3 * COLS + 3);
+      if (i >= 0) { S.board[i] = { gen: c, isNew: true }; placed.push(`${CHAINS[c].genIcon} ${CHAINS[c].gen}`); }
+    }
+  });
+  return placed;
+}
+
+/* ---------- Действия ---------- */
+function produce(i) {
+  tickEnergy();
+  if (S.energy < 1) { energyModal(); return; }
+  const it = S.board[i], to = nearestEmpty(i);
+  if (to < 0) { toast('Нет места: объедините или продайте предметы'); buzz('error'); return; }
+  const luck = S.luckUntil > Date.now();
+  const l = Math.random() < (luck ? .5 : .12) + dl('still') * .03 ? 2 : 1;
+  S.energy -= 1;
+  // иногда вместо предмета — подарок с сюрпризом
+  S.board[to] = S.level >= 2 && Math.random() < .04 + dl('cat') * .01 ? { gift: true, isNew: true } : { c: it.gen, l, isNew: true };
+  if (!S.board[to].gift) discover(it.gen, l);
+  if (S.tut === 0) S.tut = 1;
+  quest('tap');
+  beep(500 + l * 120, .09, .05); buzz('light');
+  lastAction = Date.now(); hintPair = null;
+  save(); renderAll();
+  cellEl(i).firstElementChild?.classList.add('squish');
+  flyTo(itemIcon(S.board[to]), cellEl(i), cellEl(to));
+  if (S.board[to].gift) setTimeout(() => toast('🎁 Подарок! Нажмите, чтобы открыть'), 250);
+}
+let combo = { n: 0, t: 0 };
+function merge(from, to, fromStorage, chained) {
+  const a = fromStorage ? S.storage[from] : S.board[from];
+  const nl = a.l + 1;
+  S.board[to] = { c: a.c, l: nl, isNew: true };
+  if (fromStorage) S.storage[from] = null; else S.board[from] = null;
+  S.merges++; S.xp += nl - 1;
+  if (S.tut === 1) S.tut = 2;
+  // комбо: слияния подряд быстрее 2,5 секунды
+  const now = Date.now();
+  combo.n = now - combo.t < 2500 ? combo.n + 1 : 1; combo.t = now;
+  const pitch = 1 + Math.min(combo.n, 8) * .07;
+  beep((400 + nl * 90) * pitch, .16, .06, 'sine', 0, (600 + nl * 140) * pitch); beep((800 + nl * 120) * pitch, .12, .025, 'triangle', .05); buzz(nl >= 6 ? 'heavy' : 'medium');
+  const [cx, cy] = center(cellEl(to));
+  burst(cx, cy, CHAIN_COLORS[a.c], 14 + nl * 3); ring(cx, cy, CHAIN_COLORS[a.c], 40 + nl * 8);
+  floatText(cx, cy - 18, `+${nl - 1} ✨`, '#d9c6ff');
+  if (nl >= 6) { shakeScreen(); ring(cx, cy, '#f2c46d', 120); }
+  if (combo.n >= 2) {
+    const bonus = combo.n * nl;
+    S.coins += bonus;
+    setTimeout(() => floatText(cx, cy + 14, `комбо +${bonus} 🪙`), 120);
+    if (combo.n >= 3) { showCombo(`КОМБО ×${combo.n}`, chained ? 'цепная реакция!' : ''); quest('combo'); }
+  } else if (chained) showCombo('ЦЕПНАЯ РЕАКЦИЯ', '');
+  discover(a.c, nl); quest('merge'); if (nl >= 5) quest('high');
+  if (nl >= 3) addStars(nl - 2, cx, cy - 42);
+  lastAction = now; hintPair = null;
+  // цепная реакция: такой же предмет рядом сливается сам
+  setTimeout(() => {
+    const cur = S.board[to];
+    if (!cur || cur.c !== a.c || cur.l !== nl) return;
+    const r0 = rowOf(to), c0 = to % COLS;
+    const j = [[r0 - 1, c0], [r0 + 1, c0], [r0, c0 - 1], [r0, c0 + 1]]
+      .filter(([r, c]) => r >= 0 && r < ROWS && c >= 0 && c < COLS).map(([r, c]) => r * COLS + c)
+      .find(k => !locked(k) && canMerge(S.board[k], cur));
+    if (j === undefined) return;
+    flyTo(itemIcon(S.board[j]), cellEl(j), cellEl(to));
+    merge(j, to, false, true);
+  }, 280);
+  // редкий пузырь: копия результата, которую можно выкупить за кристаллы, пока не лопнула
+  if (nl >= 4 && Math.random() < .1) {
+    const b = nearestEmpty(to);
+    if (b >= 0) { S.board[b] = { c: a.c, l: nl, bubble: Date.now() + 60000 + dl('telescope') * 20000, isNew: true }; setTimeout(() => toast('Появился пузырь! Нажмите на него, пока не лопнул'), 300); }
+  }
+  checkLevel(); save(); renderAll();
+}
+const CHAIN_COLORS = { herb: '#7bd389', crystal: '#77b8ff', glass: '#ffb35c', beast: '#e58cff' };
+function openGift(i) {
+  const chains = CHAIN_ORDER.filter(c => S.level >= GEN_UNLOCK[c]);
+  S.board[i] = null;
+  const n = 2 + ri(2), got = [];
+  for (let k = 0; k < n; k++) {
+    const to = nearestEmpty(i); if (to < 0) break;
+    const r = Math.random(), l = r < .55 ? 1 : r < .85 ? 2 : 3, c = chains[ri(chains.length)];
+    S.board[to] = { c, l, isNew: true }; got.push(CHAINS[c].icons[l - 1]); discover(c, l);
+  }
+  const gems = Math.random() < .3 ? 1 + ri(3) : 0; S.gems += gems;
+  const [x, y] = center(cellEl(i));
+  burst(x, y, '#f2c46d', 40); ring(x, y, '#f2c46d', 90);
+  floatText(x, y - 16, got.join(' ') + (gems ? `  +${gems} 💎` : ''));
+  beep(660, .1, .05); beep(990, .15, .05, 'triangle', .08); beep(1320, .25, .05, 'triangle', .16); buzz('success');
+  save(); renderAll();
+}
+function sellItem(where, idx) {
+  const it = where === 'storage' ? S.storage[idx] : S.board[idx];
+  if (!it || it.gen) { toast('Генератор продать нельзя'); return; }
+  if (it.gift) { toast('Сначала откройте подарок'); return; }
+  const doSell = () => {
+    const price = it.bubble ? 1 : val(it.l);
+    if (where === 'storage') S.storage[idx] = null; else S.board[idx] = null;
+    S.coins += price; selected = -1;
+    beep(1200, .1, .05); coinRain($('sellBin'), Math.min(6, 1 + it.l)); floatText(...center($('sellBin')), `+${price} 🪙`);
+    save(); renderAll(); toast(`Продано за 🪙 ${price}`);
+  };
+  if (it.l >= 5 && !it.bubble) {
+    openModal(`<div class="big-icon">${itemIcon(it)}</div><h2>Продать ${itemName(it)}?</h2><p>Это предмет ${it.l} уровня. Его можно отдать в заказ дороже.</p>
+      <div class="btn-row"><button class="btn" data-close>Оставить</button><button class="btn primary" id="sellYes">Продать за 🪙 ${val(it.l)}</button></div>`);
+    $('sellYes').onclick = () => { closeModal(); doSell(); };
+  } else doSell();
+}
+
+/* ---------- Отрисовка ---------- */
+const boardEl = $('board');
+const cellEl = i => boardEl.children[i];
+let selected = -1;
+function itemHTML(it) {
+  if (!it) return '';
+  if (it.gen) return `<div class="item gen">${CHAINS[it.gen].genIcon}</div>`;
+  if (it.gift) return `<div class="item gift${it.isNew ? ' pop' : ''}">🎁</div>`;
+  const cls = `item l${it.l}${it.bubble ? ' bubble' : ''}${it.isNew ? ' pop' : ''}`;
+  const lv = it.bubble ? `💎${bubblePrice(it)}` : it.l;
+  return `<div class="${cls}" style="--c:${CHAINS[it.c].color}">${CHAINS[it.c].icons[it.l - 1]}<span class="lv">${lv}</span></div>`;
+}
+const bubblePrice = it => 2 + it.l * 2;
+function renderBoard() {
+  if (boardEl.children.length !== COLS * ROWS) boardEl.innerHTML = Array.from({ length: COLS * ROWS }, (_, i) => `<div class="cell" data-i="${i}"></div>`).join('');
+  S.board.forEach((it, i) => {
+    const el = cellEl(i), lock = locked(i);
+    el.className = 'cell' + (lock ? ' locked' : '');
+    el.innerHTML = lock ? (i % COLS === 3 ? `🔒 ${ROW_UNLOCK[rowOf(i)]}` : '') : itemHTML(it);
+    if (i === selected && it && !lock) el.firstElementChild?.classList.add('selected');
+    if (hintPair?.includes(i)) el.firstElementChild?.classList.add('hint');
+    if (aiming && it && !it.gen && !it.gift && !it.bubble && !lock) el.classList.add('aim');
+    if (it) delete it.isNew;
+  });
+}
+function renderOrders() {
+  $('orders').innerHTML = S.orders.map(o => {
+    const have = needHave(o), ready = have.every(Boolean), [icon, name] = CUSTOMERS[o.who];
+    const html = `<div class="order${ready ? ' ready' : ''}${o.fresh ? ' enter' : ''}${o.vip ? ' vip' : ''}" data-order="${o.id}">
+      ${o.vip ? `<span class="vip-tag" data-vip="${o.id}">VIP · ${vipLeft(o)}</span>` : ''}
+      <div class="who">${icon}</div><div class="name">${name}</div>
+      <div class="needs">${o.needs.map((n, k) => `<div class="need${have[k] ? ' ok' : ''}" title="${CHAINS[n.c].names[n.l - 1]}">${CHAINS[n.c].icons[n.l - 1]}</div>`).join('')}</div>
+      ${ready ? `<button class="give" data-give="${o.id}">Отдать</button>` : `<div class="reward">🪙 ${o.coins}${o.gems ? ` · 💎 ${o.gems}` : ` · ✨ ${o.xp}`}</div>`}
+    </div>`;
+    delete o.fresh;
+    return html;
+  }).join('');
+}
+const vipLeft = o => { const s = Math.max(0, Math.ceil((o.vip - Date.now()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+function renderStorage() {
+  const slots = S.storage.map((it, k) => `<div class="slot${it ? '' : ' empty'}" data-slot="${k}">${it ? itemIcon(it) : ''}</div>`).join('');
+  $('storage').innerHTML = slots + (S.storage.length < 8 ? `<button class="slot add" id="addSlot" aria-label="Добавить ячейку склада">+</button>` : '');
+}
+function renderTop(bump) {
+  tickEnergy();
+  $('lvlNum').textContent = S.level;
+  $('xpRing').setAttribute('stroke-dashoffset', 119.4 * (1 - Math.min(1, S.xp / xpNeed(S.level))));
+  $('energyVal').textContent = fmt(S.energy);
+  const left = S.energy < maxE() ? regenSec() - Math.floor((Date.now() - S.eT) / 1000) % regenSec() : 0;
+  $('energyTimer').textContent = S.energy < maxE() ? ` ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : '';
+  $('coinsVal').textContent = fmt(S.coins);
+  $('gemsVal').textContent = fmt(S.gems);
+  if (bump) ['gemsPill', 'coinsPill', 'energyPill'].forEach(id => { const p = $(id); p.classList.remove('bump'); void p.offsetWidth; p.classList.add('bump'); });
+  const luck = S.luckUntil - Date.now();
+  $('energyPill').firstChild.textContent = luck > 0 ? '🍀⚡ ' : '⚡ ';
+  const nb = Object.values(S.boosters).reduce((a, b) => a + b, 0);
+  $('boosterBadge').hidden = !nb; $('boosterBadge').textContent = nb;
+  $('giftBtn').classList.toggle('ready', S.wheelDay !== today());
+  $('lvlBtn').classList.toggle('ready', achClaimable());
+  $('eventBtn').classList.toggle('ready', evClaimable());
+  $('homeBtn').classList.toggle('ready', DECOR.some((d, k) => dl(d.id) < 3 && S.coins >= decorCost(k, dl(d.id))));
+  $('questBtn').classList.toggle('ready', ensureQuests().some(q => q.prog >= q.goal && !q.claimed));
+}
+function renderInfo() {
+  const it = selected >= 0 ? S.board[selected] : null;
+  let html;
+  if (aiming) {
+    $('info').innerHTML = `${BOOSTERS[aiming].icon} <span class="booster-hint">${BOOSTERS[aiming].aim}</span><button class="act" id="aimCancel">Отмена</button>`;
+    $('aimCancel').onclick = () => { aiming = null; renderBoard(); renderInfo(); };
+    return;
+  }
+  if (it && it.gen) html = `${CHAINS[it.gen].genIcon} <span><b>${CHAINS[it.gen].gen}</b> — нажмите, чтобы получить ${CHAINS[it.gen].icons[0]} ${CHAINS[it.gen].names[0]} (⚡1)</span>`;
+  else if (it && it.gift) html = `🎁 <span><b>Подарок</b> — нажмите, чтобы открыть</span>`;
+  else if (it && it.bubble) html = `🫧 <span>Пузырь: <b>${itemName(it)}</b>. Выкупите за 💎${bubblePrice(it)}, пока не лопнул</span>`;
+  else if (it) html = `${itemIcon(it)} <span><b>${itemName(it)}</b> · ур. ${it.l} из 8${it.l < 8 ? ` · две дадут ${CHAINS[it.c].icons[it.l]} ${CHAINS[it.c].names[it.l]}` : ''}</span><button class="act" id="infoSell">🪙 ${val(it.l)}</button>`;
+  else html = ['👆 <span>Нажмите на <b>🌳 Сад</b>, чтобы вырастить росток</span>',
+    '✋ <span>Перетащите <b>одинаковые</b> предметы друг на друга, чтобы объединить</span>',
+    '📜 <span>Соберите предметы из заказа сверху и нажмите <b>«Отдать»</b></span>'][S.tut] ||
+    '<span>Объединяйте, выполняйте заказы, растите лавку. Нажмите на предмет — увидите, во что он превратится</span>';
+  $('info').innerHTML = html;
+  const b = $('infoSell'); if (b) b.onclick = () => sellItem('board', selected);
+}
+// рука показывает новичку, куда нажать и что куда тащить
+function placeHand() {
+  const hand = $('hand');
+  hand.hidden = true; hand.className = '';
+  if (!$('modalBack').hidden || aiming) return;
+  let from = null, to = null;
+  if (S.tut === 0) from = cellEl(S.board.findIndex(it => it?.gen === 'herb'));
+  else if (S.tut === 1) {
+    for (let a = 0; a < S.board.length && !to; a++) {
+      if (!S.board[a] || locked(a)) continue;
+      const b = S.board.findIndex((it, k) => k !== a && !locked(k) && canMerge(S.board[a], it));
+      if (b >= 0) { from = cellEl(a); to = cellEl(b); }
+    }
+    if (!from) from = cellEl(S.board.findIndex(it => it?.gen === 'herb'));
+  } else if (S.tut === 2) from = document.querySelector('[data-give]');
+  if (!from) return;
+  const [x, y] = center(from);
+  hand.style.left = x + 'px'; hand.style.top = y + 'px';
+  if (to) { const [x2, y2] = center(to); hand.style.setProperty('--dx', `${x2 - x}px`); hand.style.setProperty('--dy', `${y2 - y}px`); hand.className = 'drag'; }
+  else hand.className = 'tap';
+  hand.hidden = false;
+}
+function renderAll() { renderTop(); renderOrders(); renderBoard(); renderStorage(); renderInfo(); requestAnimationFrame(placeHand); }
+
+/* ---------- Перетаскивание и нажатия ---------- */
+let drag = null, ghost = null, hoverEl = null, lastAction = Date.now(), hintPair = null;
+function startDrag(e, src) {
+  drag = { ...src, x0: e.clientX, y0: e.clientY, moved: false };
+}
+document.addEventListener('pointerdown', e => {
+  lastAction = Date.now();
+  if (hintPair) { hintPair = null; renderBoard(); }
+  if (!$('modalBack').hidden) return;
+  const cell = e.target.closest('.cell'), slot = e.target.closest('.slot[data-slot]');
+  if (cell) { const i = +cell.dataset.i; if (S.board[i] && !locked(i)) startDrag(e, { from: 'board', i, it: S.board[i] }); }
+  else if (slot && S.storage[+slot.dataset.slot]) startDrag(e, { from: 'storage', i: +slot.dataset.slot, it: S.storage[+slot.dataset.slot] });
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.moved) {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 7) return;
+    if (drag.it.bubble) { drag = null; return; }   // пузырь не таскается
+    drag.moved = true;
+    ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.textContent = itemIcon(drag.it); document.body.append(ghost);
+    if (drag.from === 'board') cellEl(drag.i).classList.add('lifting');
+  }
+  ghost.style.left = e.clientX + 'px'; ghost.style.top = e.clientY + 'px';
+  const t = document.elementFromPoint(e.clientX, e.clientY);
+  const target = t?.closest('.cell, .slot[data-slot], #sellBin');
+  if (hoverEl && hoverEl !== target) hoverEl.classList.remove('target', 'merge-target');
+  hoverEl = target;
+  if (target) {
+    const ti = target.dataset.i;
+    const mergeable = ti !== undefined && +ti !== (drag.from === 'board' ? drag.i : -1) && canMerge(drag.it, S.board[+ti]);
+    target.classList.add(mergeable ? 'merge-target' : 'target');
+  }
+});
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (hoverEl) hoverEl.classList.remove('target', 'merge-target'); hoverEl = null;
+  if (ghost) { ghost.remove(); ghost = null; }
+  document.querySelectorAll('.lifting').forEach(x => x.classList.remove('lifting'));
+  if (!d.moved) { onTap(d); return; }
+  const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.cell, .slot[data-slot], #sellBin');
+  if (t) onDrop(d, t);
+});
+document.addEventListener('pointercancel', () => { drag = null; ghost?.remove(); ghost = null; });
+
+function onTap(d) {
+  if (d.from === 'storage') {             // со склада — на ближайшую свободную клетку
+    const to = nearestEmpty(3 * COLS + 3);
+    if (to < 0) { toast('На поле нет места'); return; }
+    S.board[to] = { ...d.it, isNew: true }; S.storage[d.i] = null; save(); renderAll(); return;
+  }
+  const it = S.board[d.i];
+  if (aiming) { applyBooster(d.i); return; }
+  if (it.gen) { selected = d.i; produce(d.i); return; }
+  if (it.gift) { selected = -1; openGift(d.i); return; }
+  if (it.bubble) { selected = d.i; bubbleModal(d.i); renderInfo(); return; }
+  selected = selected === d.i ? -1 : d.i;
+  renderBoard(); renderInfo();
+}
+function onDrop(d, t) {
+  const src = d.from === 'storage' ? S.storage : S.board;
+  if (t.id === 'sellBin') { sellItem(d.from, d.i); return; }
+  if (t.dataset.slot !== undefined) {
+    const k = +t.dataset.slot;
+    if (d.it.gen) { toast('Генератор на склад не помещается'); return; }
+    if (d.from === 'storage') { [S.storage[k], S.storage[d.i]] = [S.storage[d.i], S.storage[k]]; }
+    else if (!S.storage[k]) { S.storage[k] = d.it; S.board[d.i] = null; }
+    else { toast('Ячейка склада занята'); return; }
+    selected = -1; save(); renderAll(); return;
+  }
+  const j = +t.dataset.i;
+  if (locked(j)) { toast(`Ряд откроется на ${ROW_UNLOCK[rowOf(j)]} уровне`); return; }
+  if (d.from === 'board' && j === d.i) return;
+  const target = S.board[j];
+  if (canMerge(d.it, target)) { selected = j; merge(d.i, j, d.from === 'storage'); return; }
+  if (target && !target.gen && !d.it.gen && target.c === d.it.c && target.l === d.it.l && d.it.l === 8) toast('Это максимальный уровень');
+  if (target?.bubble) { toast('Сначала выкупите пузырь'); return; }
+  if (d.from === 'storage' && target) { toast('Клетка занята'); return; }
+  // перемещение на пустую клетку или обмен местами
+  src[d.i] = target || null;
+  S.board[j] = d.it;
+  selected = j; save(); renderAll();
+}
+$('orders').addEventListener('click', e => { const b = e.target.closest('[data-give]'); if (b) deliver(+b.dataset.give); });
+
+/* ---------- Окна ---------- */
+function openModal(html) { $('modal').innerHTML = html; $('modalBack').hidden = false; $('hand').hidden = true; try { TG?.BackButton?.show(); } catch (e) {} }
+function closeModal() { $('modalBack').hidden = true; requestAnimationFrame(placeHand); try { TG?.BackButton?.hide(); } catch (e) {} }
+$('modalBack').addEventListener('click', e => { if (e.target.id === 'modalBack' || e.target.closest('[data-close]')) closeModal(); });
+TG?.BackButton?.onClick?.(closeModal);
+let toastT;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 2400); }
+
+function spendGems(n, then) {
+  if (S.gems < n) { shopModal('stars'); toast(`Не хватает 💎 ${n - S.gems}`); return; }
+  S.gems -= n; then(); save(); renderAll(); renderTop(true);
+}
+function energyModal() {
+  const left = regenSec() - Math.floor((Date.now() - S.eT) / 1000) % regenSec();
+  openModal(`<div class="big-icon">⚡</div><h2>Энергия закончилась</h2><p>+1 каждые ${regenSec()} секунд, следующая через ${left} с.</p>
+    <div class="row"><div class="ico">⚡</div><div class="txt"><b>+100 энергии</b><small>Сразу продолжить</small></div><button class="buy" id="eGems">💎 ${PRICES.energy100}</button></div>
+    <div class="row"><div class="ico">⚡</div><div class="txt"><b>+25 энергии</b><small>За монеты</small></div><button class="buy" id="eCoins" ${S.coins < PRICES.energy25Coins ? 'disabled' : ''}>🪙 ${PRICES.energy25Coins}</button></div>
+    <button class="btn" data-close>Подожду</button>`);
+  $('eGems').onclick = () => spendGems(PRICES.energy100, () => { S.energy += 100; closeModal(); toast('⚡ +100'); });
+  $('eCoins').onclick = () => { if (S.coins < PRICES.energy25Coins) return; S.coins -= PRICES.energy25Coins; S.energy += 25; save(); renderAll(); closeModal(); toast('⚡ +25'); };
+}
+function bubbleModal(i) {
+  const it = S.board[i], p = bubblePrice(it), sec = Math.max(0, Math.ceil((it.bubble - Date.now()) / 1000));
+  openModal(`<div class="big-icon">${itemIcon(it)}</div><h2>${itemName(it)} в пузыре</h2><p>Пузырь лопнет через ${sec} с. Выкупите его, и предмет останется на поле.</p>
+    <div class="btn-row"><button class="btn" data-close>Не нужно</button><button class="btn primary" id="bubbleBuy">Забрать за 💎 ${p}</button></div>`);
+  $('bubbleBuy').onclick = () => spendGems(p, () => { if (S.board[i]?.bubble) { delete S.board[i].bubble; S.board[i].isNew = true; } closeModal(); beep(900, .2, .06); });
+}
+function shopModal(tab = 'stars') {
+  const starterHTML = S.starter ? '' : `<div class="pack starter"><div><div style="font-weight:800">🎁 Набор новичка</div><small style="color:var(--muted)">💎 ${STARTER.gems} и ⚡ ${STARTER.energy} · один раз</small></div><button class="price" data-pack="starter">⭐ ${STARTER.stars}</button></div>`;
+  const nextRow = ROW_UNLOCK.findIndex((L, r) => S.level < L && !S.rowsBought.includes(r));
+  const shop = `
+    <div class="row"><div class="ico">⚡</div><div class="txt"><b>+100 энергии</b><small>Генераторы работают дальше</small></div><button class="buy" data-buy="energy">💎 ${PRICES.energy100}</button></div>
+    <div class="row"><div class="ico">🍀</div><div class="txt"><b>Удача на 15 минут</b><small>Генераторы чаще дают предметы 2 уровня</small></div><button class="buy" data-buy="luck">💎 ${PRICES.luck}</button></div>
+    ${nextRow >= 0 ? `<div class="row"><div class="ico">🔓</div><div class="txt"><b>Открыть ряд поля</b><small>Не ждать ${ROW_UNLOCK[nextRow]} уровня</small></div><button class="buy" data-buy="row">💎 ${PRICES.row}</button></div>` : ''}
+    ${S.storage.length < 8 ? `<div class="row"><div class="ico">📦</div><div class="txt"><b>Ячейка склада</b><small>Сейчас ${S.storage.length} из 8</small></div><button class="buy" data-buy="slot">💎 ${PRICES.slot}</button></div>` : ''}
+    ${Object.entries(BOOSTERS).map(([k, b]) => `<div class="row"><div class="ico">${b.icon}</div><div class="txt"><b>${b.name}</b><small>${b.desc} · есть ${S.boosters[k]}</small></div><button class="buy" data-buy="${k}">💎 ${PRICES[k]}</button></div>`).join('')}
+    <div class="row"><div class="ico">🧰</div><div class="txt"><b>Сундук алхимика</b><small>3 предмета 1–3 уровня: 60% — 1-й, 30% — 2-й, 10% — 3-й</small></div><button class="buy" data-buy="chest" ${S.coins < PRICES.chestCoins ? 'disabled' : ''}>🪙 ${PRICES.chestCoins}</button></div>`;
+  const stars = `<div class="packs">${starterHTML}${PACKS.map(p => `<div class="pack${p.best ? ' best' : ''}">${p.tag ? `<span class="tag">${p.tag}</span>` : ''}<div class="gem-big">💎</div><b>${fmt(p.gems)}</b><button class="price" data-pack="${p.id}">⭐ ${p.stars}</button></div>`).join('')}</div>
+    <p class="fine">Оплата Telegram Stars. Кристаллы нельзя вывести или обменять обратно на Stars.<br>Вопросы по покупкам: команда /paysupport в боте.</p>`;
+  openModal(`<h2>Лавка</h2>
+    <div class="tabs" role="tablist"><button role="tab" aria-selected="${tab === 'stars'}" data-tab="stars">💎 Кристаллы</button><button role="tab" aria-selected="${tab === 'shop'}" data-tab="shop">🛒 Товары</button></div>
+    ${tab === 'stars' ? stars : shop}<button class="btn" data-close>Закрыть</button>`);
+  $('modal').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => shopModal(b.dataset.tab));
+  $('modal').querySelectorAll('[data-pack]').forEach(b => b.onclick = () => buyPack(b.dataset.pack));
+  $('modal').querySelectorAll('[data-buy]').forEach(b => b.onclick = () => buyItem(b.dataset.buy));
+}
+function buyItem(kind) {
+  if (kind === 'energy') spendGems(PRICES.energy100, () => { S.energy += 100; toast('⚡ +100'); });
+  if (kind === 'luck') spendGems(PRICES.luck, () => { S.luckUntil = Math.max(Date.now(), S.luckUntil) + 15 * 60000; toast('🍀 Удача на 15 минут'); });
+  if (kind === 'row') spendGems(PRICES.row, () => { const r = ROW_UNLOCK.findIndex((L, k) => S.level < L && !S.rowsBought.includes(k)); if (r >= 0) S.rowsBought.push(r); toast('🔓 Ряд открыт'); });
+  if (kind === 'slot') spendGems(PRICES.slot, () => { if (S.storage.length < 8) S.storage.push(null); toast('📦 Склад больше'); });
+  if (BOOSTERS[kind]) spendGems(PRICES[kind], () => { S.boosters[kind]++; toast(`${BOOSTERS[kind].icon} +1`); });
+  if (kind === 'chest') {
+    if (S.coins < PRICES.chestCoins) return;
+    const chains = CHAIN_ORDER.filter(c => S.level >= GEN_UNLOCK[c]);
+    const free = S.board.filter((it, i) => !it && !locked(i)).length;
+    if (free < 3) { toast('Нужно 3 свободные клетки'); return; }
+    S.coins -= PRICES.chestCoins;
+    for (let k = 0; k < 3; k++) { const r = Math.random(), l = r < .6 ? 1 : r < .9 ? 2 : 3; const i = nearestEmpty(3 * COLS + 3); S.board[i] = { c: chains[ri(chains.length)], l, isNew: true }; }
+    save(); renderAll(); toast('🧰 Сундук открыт');
+  }
+  if (!$('modalBack').hidden) shopModal('shop');
+}
+// покупка за Telegram Stars: счёт создаёт сервер, кристаллы начисляет он же после оплаты
+async function buyPack(id) {
+  const p = id === 'starter' ? STARTER : PACKS.find(x => x.id === id);
+  if (!p) return;
+  if (DEMO) {
+    S.gems += p.gems; S.energy += p.energy || 0; if (id === 'starter') S.starter = true;
+    save(); renderTop(true); renderAll(); closeModal(); toast(`Демо: +💎 ${p.gems} без оплаты`); burst(innerWidth / 2, innerHeight / 3, '#6fd3ff', 50); return;
+  }
+  if (!API) { toast('Покупки заработают после подключения сервера'); return; }
+  if (!TG) { toast('Покупка доступна внутри Telegram'); return; }
+  const r = await api('/api/invoice', { pack: id });
+  if (!r?.link) { toast(r?.error === 'starter' ? 'Набор новичка уже куплен' : 'Не удалось создать счёт, попробуйте позже'); return; }
+  TG.openInvoice(r.link, async status => {
+    if (status === 'paid') {
+      closeModal(); toast('Оплата прошла, начисляем…');
+      for (let k = 0; k < 10; k++) { if (applyCredits(await api('/api/load'))) return; await new Promise(res => setTimeout(res, 1500)); }
+      toast('Кристаллы придут в течение минуты');
+    } else if (status === 'failed') toast('Оплата не прошла');
+  });
+}
+function homeModal(justUp) {
+  const stars = DECOR.reduce((a, d) => a + dl(d.id), 0);
+  openModal(`<div class="rays-top"><div class="big-icon">🏠</div></div><h2>Обустройство лавки</h2>
+    <p>★ ${stars} из ${DECOR.length * 3}. Каждая ступень даёт постоянный бонус.</p>
+    <div class="decor-grid">${DECOR.map((d, k) => { const st = dl(d.id), cost = st < 3 ? decorCost(k, st) : 0;
+      return `<div class="decor${justUp === d.id ? ' upgraded' : ''}"><div class="di s${st}">${d.icon}</div><b>${d.name}</b>
+        <div class="stars">${'★'.repeat(st)}${'☆'.repeat(3 - st)}</div>
+        <small>${st ? `Сейчас: ${d.perk(st)}` : ''}${st < 3 ? `${st ? '<br>' : ''}Дальше: ${d.perk(st + 1)}` : ''}</small>
+        ${st < 3 ? `<button class="buy" data-decor="${d.id}" ${S.coins < cost ? 'disabled' : ''}>🪙 ${fmt(cost)}</button>` : '<button class="buy" disabled>Готово ✓</button>'}</div>`; }).join('')}</div>
+    <button class="btn" data-close>Закрыть</button>`);
+  $('modal').querySelectorAll('[data-decor]').forEach(b => b.onclick = () => {
+    const k = DECOR.findIndex(d => d.id === b.dataset.decor), d = DECOR[k], st = dl(d.id), cost = decorCost(k, st);
+    if (S.coins < cost) return;
+    S.coins -= cost; S.decor[d.id] = st + 1; S.xp += 10 * (st + 1);
+    const [x, y] = center(b);
+    burst(x, y - 60, '#f2c46d', 40); ring(x, y - 60, '#f2c46d', 90);
+    beep(660, .15, .05); beep(990, .2, .05, 'triangle', .1); beep(1320, .3, .05, 'triangle', .2); buzz('success');
+    toast(`${d.icon} ${d.name}: ${d.perk(st + 1)}`);
+    checkLevel(); save(); renderTop(true); homeModal(d.id);
+  });
+}
+
+// календарь входа: награда растёт до 7-го дня подряд, пропуск — снова с первого
+const LOGIN = [
+  { icon: '🪙', label: '50', give: () => { S.coins += 50; } },
+  { icon: '⚡', label: '30', give: () => { S.energy += 30; } },
+  { icon: '✨', label: 'пыль', give: () => { S.boosters.dust++; } },
+  { icon: '💎', label: '3', give: () => { S.gems += 3; } },
+  { icon: '🪞', label: 'зеркало', give: () => { S.boosters.mirror++; } },
+  { icon: '🪙', label: '150 + ⚡30', give: () => { S.coins += 150; S.energy += 30; } },
+  { icon: '💎', label: '10 + 🧹', give: () => { S.gems += 10; S.boosters.broom++; } },
+];
+function checkLogin() {
+  if (!$('modalBack').hidden) { setTimeout(checkLogin, 2000); return; } // не перекрывать другое окно
+  const d = today();
+  if (S.login.last !== d) {
+    const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    S.login = { last: d, streak: S.login.last === y ? S.login.streak % 7 + 1 : 1, claimed: false };
+    save();
+  }
+  if (!S.login.claimed) loginModal();
+}
+function loginModal() {
+  const n = S.login.streak;
+  openModal(`<div class="big-icon">🗓️</div><h2>День ${n} из 7</h2><p>Заходите каждый день — награды растут. Пропустите день, и счёт начнётся заново.</p>
+    <div class="cal">${LOGIN.map((r, k) => `<div class="${k + 1 < n || (k + 1 === n && S.login.claimed) ? 'done' : ''}${k + 1 === n ? ' today' : ''}${k === 6 ? ' big' : ''}">День ${k + 1}<b>${r.icon}</b>${r.label}</div>`).join('')}</div>
+    ${S.login.claimed ? '<button class="btn" data-close>Закрыть</button>' : '<button class="btn primary" id="loginClaim">Забрать награду</button>'}`);
+  const b = $('loginClaim');
+  if (b) b.onclick = () => {
+    LOGIN[n - 1].give(); S.login.claimed = true; save(); renderAll(); renderTop(true);
+    burst(...center(b), '#f2c46d', 50); beep(784, .2, .06); beep(1175, .3, .05, 'triangle', .1); buzz('success');
+    loginModal();
+  };
+}
+
+// достижения: по три ступени, награда кристаллами
+const ACH = [
+  { id: 'merges', icon: '🔮', name: 'Мастер слияний', unit: 'слияний', stat: () => S.merges, tiers: [50, 250, 1000], gems: [3, 8, 20] },
+  { id: 'orders', icon: '📜', name: 'Любимец покупателей', unit: 'заказов', stat: () => S.ordersDone, tiers: [10, 50, 200], gems: [3, 8, 20] },
+  { id: 'found', icon: '📖', name: 'Исследователь', unit: 'открытий', stat: () => Object.keys(S.found).length, tiers: [10, 20, 32], gems: [5, 10, 25] },
+  { id: 'level', icon: '🏅', name: 'Опытный алхимик', unit: 'уровень', stat: () => S.level, tiers: [5, 10, 15], gems: [5, 10, 25] },
+  { id: 'vip', icon: '👑', name: 'Для особых гостей', unit: 'VIP-заказов', stat: () => S.vipDone || 0, tiers: [3, 10, 30], gems: [4, 10, 25] },
+  { id: 'decor', icon: '🏠', name: 'Уютная лавка', unit: '★ обустройства', stat: () => DECOR.reduce((a, d) => a + dl(d.id), 0), tiers: [5, 12, 24], gems: [4, 10, 25] },
+];
+const achClaimable = () => ACH.some(a => { const t = S.ach[a.id] || 0; return t < 3 && a.stat() >= a.tiers[t]; });
+
+function levelModal(tab = 'book') {
+  const next = [];
+  CHAIN_ORDER.forEach(c => { if (GEN_UNLOCK[c] > S.level) next.push(`${CHAINS[c].genIcon} ${CHAINS[c].gen} — на ${GEN_UNLOCK[c]} уровне`); });
+  ROW_UNLOCK.forEach((L, r) => { if (L > S.level && !S.rowsBought.includes(r)) next.push(`🔓 ряд ${r + 1} — на ${L} уровне`); });
+  const tabs = `<div class="tabs" style="grid-template-columns:repeat(3,1fr)">${[['book', '📖 Книга'], ['ach', `🏆 Награды${achClaimable() ? ' •' : ''}`], ['set', '⚙️ Настройки']].map(([k, t]) => `<button data-tab="${k}" aria-selected="${tab === k}">${t}</button>`).join('')}</div>`;
+  const head = `<div class="big-icon">🏅</div><h2>Уровень ${S.level}</h2><p>Опыт: ${S.xp} из ${xpNeed(S.level)}. Опыт дают заказы и слияния.</p>${tabs}`;
+  if (tab === 'ach') {
+    openModal(`${head}${ACH.map(a => { const t = S.ach[a.id] || 0, v = a.stat(), can = t < 3 && v >= a.tiers[t];
+      return `<div class="ach"><div class="ai">${a.icon}</div><div class="at"><b>${a.name}</b><span class="tiers"> ${'★'.repeat(t)}${'☆'.repeat(3 - t)}</span>
+        <small>${t < 3 ? `${Math.min(v, a.tiers[t])} из ${a.tiers[t]} ${a.unit} · награда 💎 ${a.gems[t]}` : 'Все ступени пройдены'}</small></div>
+        ${can ? `<button class="claim" data-ach="${a.id}">💎 ${a.gems[t]}</button>` : ''}</div>`; }).join('')}<button class="btn" data-close>Закрыть</button>`);
+    $('modal').querySelectorAll('[data-ach]').forEach(b => b.onclick = () => {
+      const a = ACH.find(x => x.id === b.dataset.ach), t = S.ach[a.id] || 0;
+      S.gems += a.gems[t]; S.ach[a.id] = t + 1;
+      coinRain(b, 5, '💎', 'gemsPill'); burst(...center(b), '#6fd3ff', 30); beep(1175, .25, .05);
+      save(); renderTop(); levelModal('ach');
+    });
+  } else if (tab === 'set') {
+    openModal(`${head}${[['sound', '🔊 Звуки'], ['music', '🎵 Музыка'], ['haptic', '📳 Вибрация']].map(([k, t]) => `<button class="toggle" data-set="${k}" aria-pressed="${S.settings[k]}">${t}<i></i></button>`).join('')}
+      <button class="btn" data-close>Закрыть</button>`);
+  } else openModal(`${head}
+    ${next.length ? `<div class="rewards">${next.map(n => `<span>${n}</span>`).join('')}</div>` : ''}
+    <h2 style="font-size:19px">Книга открытий · ${Object.keys(S.found).length} из ${CHAIN_ORDER.length * 8}</h2>
+    <div class="book">${CHAIN_ORDER.map(c => `<p>${CHAINS[c].name}</p><div class="chain">${CHAINS[c].icons.map((ic, k) => `<span class="${S.found[c + (k + 1)] ? '' : 'unknown'}" title="${S.found[c + (k + 1)] ? CHAINS[c].names[k] : '?'}">${ic}</span>`).join('')}</div>`).join('')}</div>
+    <p class="fine">Каждый новый предмет с 3 уровня приносит кристаллы.</p>
+    <button class="btn" data-close>Закрыть</button>`);
+  $('modal').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => levelModal(b.dataset.tab));
+  $('modal').querySelectorAll('[data-set]').forEach(b => b.onclick = () => {
+    const k = b.dataset.set; S.settings[k] = !S.settings[k]; b.setAttribute('aria-pressed', S.settings[k]);
+    if (k === 'music') S.settings.music ? startMusic() : stopMusic();
+    save();
+  });
+}
+
+const QUESTS = [
+  { id: 'merge', text: 'Сделайте 25 слияний', goal: 25, coins: 150 },
+  { id: 'order', text: 'Выполните 6 заказов', goal: 6, gems: 5 },
+  { id: 'tap', text: 'Нажмите на генераторы 40 раз', goal: 40, coins: 100 },
+  { id: 'high', text: 'Создайте предмет 5 уровня', goal: 1, gems: 4 },
+  { id: 'combo', text: 'Сделайте комбо ×3', goal: 1, gems: 3 },
+  { id: 'vip', text: 'Выполните VIP-заказ', goal: 1, gems: 6 },
+];
+// три задания на день, одинаковые для дня, чтобы не перебирать
+function ensureQuests() {
+  if (S.quests?.day === today()) return S.quests.list;
+  const seed = [...today()].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7);
+  const pool = QUESTS.filter(q => q.id !== 'vip' || S.level >= 2);
+  const pick = []; let k = Math.abs(seed);
+  while (pick.length < 3) { const q = pool[k % pool.length]; if (!pick.includes(q)) pick.push(q); k = Math.floor(k / 3) + 7; }
+  S.quests = { day: today(), list: pick.map(q => ({ id: q.id, prog: 0, claimed: false, goal: q.goal })) };
+  return S.quests.list;
+}
+function quest(id, n = 1) {
+  const q = ensureQuests().find(x => x.id === id);
+  if (!q || q.prog >= q.goal) return;
+  q.prog = Math.min(q.goal, q.prog + n);
+  if (q.prog >= q.goal) { toast(`📜 Задание выполнено: ${QUESTS.find(x => x.id === id).text}`); beep(1175, .2, .05); }
+}
+function questModal() {
+  const list = ensureQuests();
+  openModal(`<div class="big-icon">📜</div><h2>Задания на сегодня</h2>
+    ${list.map(q => { const d = QUESTS.find(x => x.id === q.id), done = q.prog >= q.goal;
+      return `<div class="quest${done ? ' done' : ''}"><div class="qh"><b>${d.text}</b><span>${d.gems ? `💎 ${d.gems}` : `🪙 ${d.coins}`}</span></div>
+        <div class="qbar"><i style="width:${q.prog / q.goal * 100}%"></i></div>
+        ${q.claimed ? '<small style="color:var(--muted)">Награда получена</small>' : done ? `<button class="claim" data-claim="${q.id}">Забрать</button>` : `<small style="color:var(--muted)">${q.prog} из ${q.goal}</small>`}</div>`; }).join('')}
+    <p class="fine">Новые задания — завтра.</p><button class="btn" data-close>Закрыть</button>`);
+  $('modal').querySelectorAll('[data-claim]').forEach(b => b.onclick = () => {
+    const q = list.find(x => x.id === b.dataset.claim), d = QUESTS.find(x => x.id === q.id);
+    q.claimed = true; S.gems += d.gems || 0; S.coins += d.coins || 0;
+    coinRain(b, 6, d.gems ? '💎' : '🪙', d.gems ? 'gemsPill' : 'coinsPill');
+    burst(...center(b), '#a6e36a', 30);
+    save(); renderTop(); questModal();
+  });
+}
+$('questBtn').onclick = questModal;
+
+/* ---------- Звездопад: недельное событие, рейтинг и друзья ---------- */
+const BOT = '';   // имя бота без @ — для ссылки-приглашения; вписать после создания бота
+const EV_TRACK = [
+  { at: 15, coins: 100 }, { at: 40, booster: 'dust' }, { at: 80, gems: 5 }, { at: 130, energy: 50 },
+  { at: 200, booster: 'broom' }, { at: 290, gems: 10 }, { at: 400, coins: 600 }, { at: 550, gems: 25 },
+];
+// ISO-неделя в UTC: та же формула, что на сервере
+function weekId(d = new Date()) {
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return `${t.getUTCFullYear()}-W${String(Math.ceil(((t - y0) / 864e5 + 1) / 7)).padStart(2, '0')}`;
+}
+function weekLeft() {
+  const d = new Date(), day = d.getUTCDay() || 7;
+  const h = Math.max(0, Math.floor((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 8 - day) - d) / 36e5));
+  return h >= 24 ? `${Math.floor(h / 24)} д ${h % 24} ч` : `${h} ч`;
+}
+function ensureEvent() {
+  const w = weekId();
+  if (S.ev?.week !== w) S.ev = { week: w, stars: 0, claimed: [] };
+  return S.ev;
+}
+const evClaimable = () => { const e = ensureEvent(); return EV_TRACK.some((r, k) => e.stars >= r.at && !e.claimed.includes(k)); };
+const evLabel = r => r.coins ? `🪙 ${r.coins}` : r.gems ? `💎 ${r.gems}` : r.energy ? `⚡ ${r.energy}` : `${BOOSTERS[r.booster].icon} ${BOOSTERS[r.booster].name}`;
+const esc = t => String(t).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`);
+let scoreTimer;
+function sendScore() {
+  clearTimeout(scoreTimer);
+  scoreTimer = setTimeout(() => api('/api/score', { week: S.ev.week, stars: S.ev.stars }), 5000);
+}
+function addStars(n, x, y) {
+  const e = ensureEvent(), was = evClaimable();
+  e.stars += n;
+  setTimeout(() => {
+    floatText(x, y, `+${n} 🌟`, '#cdbbff');
+    const btn = $('eventBtn'), [bx, by] = center(btn);
+    const el = document.createElement('div'); el.className = 'fly'; el.textContent = '🌟';
+    el.style.left = x - 13 + 'px'; el.style.top = y - 13 + 'px'; document.body.append(el);
+    requestAnimationFrame(() => { el.style.transform = `translate(${bx - x}px, ${by - y}px) scale(.6)`; el.style.opacity = '.3'; });
+    setTimeout(() => { el.remove(); btn.classList.remove('bump'); void btn.offsetWidth; btn.classList.add('bump'); }, 480);
+  }, 200);
+  if (!was && evClaimable()) setTimeout(() => toast('🌟 Награда «Звездопада» ждёт!'), 700);
+  sendScore();
+}
+function eventModal(tab = 'track') {
+  const e = ensureEvent();
+  const next = EV_TRACK.find(r => e.stars < r.at);
+  const tabs = `<div class="tabs" style="grid-template-columns:repeat(3,1fr)">${[['track', '🌟 Награды'], ['top', '🏆 Рейтинг'], ['friends', '👥 Друзья']]
+    .map(([k, t]) => `<button data-tab="${k}" aria-selected="${tab === k}">${t}</button>`).join('')}</div>`;
+  const head = `<div class="ev-sky"><i></i><i></i><i></i><b>🌟 ${fmt(e.stars)}</b><small>Звездопад · до конца недели ${weekLeft()}</small></div>
+    <h2>Звездопад</h2>${tabs}`;
+  if (tab === 'top') {
+    openModal(`${head}<p>Лучшие алхимики недели по звёздам. Звёзды обнуляются в понедельник.</p><div id="lbList" style="display:flex;flex-direction:column;gap:6px"><p>Загрузка…</p></div>
+      <button class="btn" data-close>Закрыть</button>`);
+    const show = (r, demo) => {
+      const list = $('lbList'); if (!list) return;
+      if (!r) { list.innerHTML = '<p>Рейтинг появится, когда игра заработает в Telegram.</p>'; return; }
+      const row = (x, k) => `<div class="lb${x.me ? ' me' : ''}"><b>${['🥇', '🥈', '🥉'][k] || k + 1}</b><span>${esc(x.name)}${x.me && x.name !== 'Вы' ? ' (вы)' : ''}</span><i>🌟 ${fmt(x.stars)}</i></div>`;
+      list.innerHTML = (demo ? '<p class="fine">Пример: настоящие игроки появятся после запуска</p>' : '') + r.top.map(row).join('')
+        + (r.me && !r.top.some(x => x.me) ? `<p class="fine">…</p>${row({ name: 'Вы', stars: r.me.stars, me: true }, r.me.rank - 1)}` : '')
+        + (!r.top.length ? '<p>Пока никого — станьте первым!</p>' : '');
+    };
+    if (DEMO) {
+      const top = [['Мирра', 640], ['Алхимик Лео', 410], ['Ника В.', 260], ['Тимур', 150], ['Соня К.', 90], ['Ян', 40]].map(([name, stars]) => ({ name, stars }));
+      top.push({ name: 'Вы', stars: e.stars, me: true }); top.sort((a, b) => b.stars - a.stars);
+      show({ top }, true);
+    } else api('/api/top').then(r => show(r));
+  } else if (tab === 'friends') {
+    openModal(`${head}<div class="invite"><div class="big-icon" style="font-size:48px">👥</div><b>${S.invites || 0}</b><small style="color:var(--muted);font-weight:700">друзей пришло по вашей ссылке</small></div>
+      <div class="rewards"><span>Вам 💎 25 за друга</span><span>Другу 💎 10 на старте</span></div>
+      <p>Кристаллы начисляются, когда друг впервые откроет бота по вашей ссылке.</p>
+      <button class="btn primary" id="inviteBtn">Пригласить друга</button><button class="btn" data-close>Закрыть</button>`);
+    $('inviteBtn').onclick = () => {
+      const id = TG?.initDataUnsafe?.user?.id;
+      if (!TG || !BOT || !id) { toast(DEMO ? 'В Telegram здесь откроется выбор чата для ссылки' : 'Приглашения заработают после запуска в Telegram'); return; }
+      const link = `https://t.me/${BOT}?start=ref_${id}`;
+      TG.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Заходи в мою Зельеварню: выращиваем травы, варим зелья и выполняем заказы. По ссылке +💎 10 на старте!')}`);
+    };
+  } else {
+    openModal(`${head}
+      <p>${next ? `Ещё ${next.at - e.stars} 🌟 до награды «${evLabel(next)}»` : 'Все награды недели собраны!'}</p>
+      <div class="evbar"><i style="width:${Math.min(100, e.stars / EV_TRACK.at(-1).at * 100)}%"></i></div>
+      ${EV_TRACK.map((r, k) => { const got = e.claimed.includes(k), can = !got && e.stars >= r.at;
+        return `<div class="evr${got ? ' got' : can ? ' can' : ''}"><div class="n">🌟 ${r.at}</div><div class="r">${evLabel(r)}</div>
+          ${got ? '<small>✓ получено</small>' : can ? `<button class="claim" data-ev="${k}">Забрать</button>` : `<small>ещё ${r.at - e.stars}</small>`}</div>`; }).join('')}
+      <p class="fine">Звёзды дают слияния с 3 уровня (больше за высокие уровни), заказы — 3 🌟, VIP-заказы — 8 🌟. Награды сгорают в понедельник.</p>
+      <button class="btn" data-close>Закрыть</button>`);
+    $('modal').querySelectorAll('[data-ev]').forEach(b => b.onclick = () => {
+      const k = +b.dataset.ev, r = EV_TRACK[k];
+      if (e.claimed.includes(k) || e.stars < r.at) return;
+      e.claimed.push(k);
+      S.coins += r.coins || 0; S.gems += r.gems || 0; S.energy += r.energy || 0;
+      if (r.booster) S.boosters[r.booster]++;
+      const [x, y] = center(b);
+      burst(x, y, '#b59cff', 36); ring(x, y, '#e6dcff', 80);
+      if (r.coins) coinRain(b, 6); if (r.gems) coinRain(b, 5, '💎', 'gemsPill'); if (r.energy) coinRain(b, 5, '⚡', 'energyPill');
+      beep(988, .2, .05); beep(1319, .3, .05, 'triangle', .1); buzz('success');
+      save(); renderTop(); eventModal('track');
+    });
+  }
+  $('modal').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => eventModal(b.dataset.tab));
+}
+$('eventBtn').onclick = () => eventModal();
+
+$('gemsPill').onclick = () => shopModal('stars');
+$('energyPill').onclick = energyModal;
+$('lvlBtn').onclick = () => levelModal();
+$('homeBtn').onclick = () => homeModal();
+$('coinsPill').onclick = () => shopModal('shop');
+$('sellBin').onclick = () => { if (selected >= 0 && S.board[selected]) sellItem('board', selected); else toast('Перетащите предмет сюда, чтобы продать'); };
+$('boostBtn').onclick = boosterModal;
+
+// колесо удачи: шансы открыты, призы только внутри игры
+const WHEEL = [
+  { icon: '🪙', label: '50', p: 22, give: () => { S.coins += 50; } },
+  { icon: '⚡', label: '20', p: 20, give: () => { S.energy += 20; } },
+  { icon: '🪙', label: '150', p: 14, give: () => { S.coins += 150; } },
+  { icon: '✨', label: 'пыль', p: 12, give: () => { S.boosters.dust++; } },
+  { icon: '⚡', label: '50', p: 10, give: () => { S.energy += 50; } },
+  { icon: '🪞', label: 'зеркало', p: 10, give: () => { S.boosters.mirror++; } },
+  { icon: '💎', label: '3', p: 9, give: () => { S.gems += 3; } },
+  { icon: '💎', label: '10', p: 3, give: () => { S.gems += 10; } },
+];
+const SEG_COLORS = ['#3b2a46', '#2c3a2a', '#3b2a46', '#24364a', '#3b2a46', '#2c3a2a', '#24364a', '#4a3618'];
+let wheelAngle = 0, wheelSpinning = false;
+function wheelSVG() {
+  const seg = 360 / WHEEL.length, R = 140;
+  const pt = (a, r) => [140 + r * Math.sin(a * Math.PI / 180), 140 - r * Math.cos(a * Math.PI / 180)];
+  return `<svg viewBox="0 0 280 280" id="wheelSvg" style="transform: rotate(${wheelAngle}deg)">
+    <circle cx="140" cy="140" r="139" fill="#2a1c05"/>
+    ${WHEEL.map((w, i) => { const [x1, y1] = pt(i * seg, R - 6), [x2, y2] = pt((i + 1) * seg, R - 6), [tx, ty] = pt(i * seg + seg / 2, R - 46), [lx, ly] = pt(i * seg + seg / 2, R - 76);
+      return `<path d="M140 140 L${x1} ${y1} A${R - 6} ${R - 6} 0 0 1 ${x2} ${y2} Z" fill="${SEG_COLORS[i]}" stroke="#f2c46d" stroke-width="2"/>
+        <text x="${tx}" y="${ty}" font-size="26" text-anchor="middle" dominant-baseline="central" transform="rotate(${i * seg + seg / 2} ${tx} ${ty})">${w.icon}</text>
+        <text x="${lx}" y="${ly}" font-size="12" font-weight="800" fill="#f3ebdf" text-anchor="middle" dominant-baseline="central" font-family="Manrope, sans-serif" transform="rotate(${i * seg + seg / 2} ${lx} ${ly})">${w.label}</text>`; }).join('')}
+    ${WHEEL.map((_, i) => { const [x, y] = pt(i * seg, R - 3); return `<circle cx="${x}" cy="${y}" r="4" fill="#fff1c2"/>`; }).join('')}
+  </svg>`;
+}
+function wheelModal() {
+  const free = S.wheelDay !== today();
+  openModal(`<h2>Колесо удачи</h2>
+    <div class="wheel-box"><div class="wheel-pointer"></div>${wheelSVG()}<div class="wheel-hub">🧪</div></div>
+    <button class="btn primary" id="spinBtn">${free ? 'Крутить бесплатно' : `Крутить ещё · 💎 ${PRICES.spin}`}</button>
+    <p class="odds">Шансы: ${WHEEL.map(w => `${w.icon}${w.label} — ${w.p}%`).join(' · ')}</p>
+    <p class="fine">Бесплатный прокрут — раз в день. Призы остаются в игре.</p>`);
+  $('spinBtn').onclick = spinWheel;
+}
+function spinWheel() {
+  if (wheelSpinning) return;
+  const free = S.wheelDay !== today();
+  if (!free && S.gems < PRICES.spin) { toast(`Нужно 💎 ${PRICES.spin}`); return; }
+  if (free) S.wheelDay = today(); else S.gems -= PRICES.spin;
+  let r = Math.random() * 100, idx = 0;
+  while ((r -= WHEEL[idx].p) > 0 && idx < WHEEL.length - 1) idx++;
+  const seg = 360 / WHEEL.length;
+  const base = Math.ceil(wheelAngle / 360) * 360;
+  wheelAngle = base + 360 * 6 - (idx * seg + seg / 2) + (Math.random() - .5) * seg * .6;
+  wheelSpinning = true; save(); renderTop();
+  $('spinBtn').disabled = true;
+  const svg = $('wheelSvg');
+  void svg.getBoundingClientRect(); // запуск анимации со следующего кадра, даже если окно только открылось
+  requestAnimationFrame(() => { svg.style.transform = `rotate(${wheelAngle}deg)`; });
+  // щелчки колеса: всё реже к остановке
+  let t = 0; for (let k = 0; k < 34; k++) { t += 30 + k * k * 2.6; setTimeout(() => beep(1400, .025, .03), t); }
+  setTimeout(() => {
+    wheelSpinning = false;
+    const w = WHEEL[idx]; w.give(); save(); renderAll(); renderTop(true);
+    beep(784, .2, .06); beep(1047, .3, .06, 'triangle', .1); beep(1568, .4, .05, 'triangle', .2); buzz('success');
+    burst(innerWidth / 2, innerHeight * .35, '#f2c46d', 60); ring(innerWidth / 2, innerHeight * .35, '#f2c46d', 140);
+    showCombo(`${w.icon} ${w.label}`, 'приз колеса');
+    $('spinBtn').disabled = false;
+    $('spinBtn').textContent = `Крутить ещё · 💎 ${PRICES.spin}`;
+  }, 4300);
+}
+$('giftBtn').onclick = wheelModal;
+$('storage').addEventListener('click', e => { if (e.target.closest('#addSlot')) shopModal('shop'); });
+
+/* ---------- Таймер: энергия, пузыри ---------- */
+setInterval(() => {
+  let changed = false;
+  S.board.forEach((it, i) => {
+    if (it?.bubble && it.bubble < Date.now()) { S.board[i] = null; S.coins += 1; changed = true; toast('Пузырь лопнул: +🪙 1'); }
+  });
+  // VIP-заказы: таймер и уход покупателя
+  S.orders.forEach(o => { if (!o.vip) return; const t = document.querySelector(`[data-vip="${o.id}"]`); if (t) t.textContent = `VIP · ${vipLeft(o)}`; });
+  const gone = S.orders.filter(o => o.vip && o.vip < Date.now());
+  if (gone.length) { S.orders = S.orders.filter(o => !gone.includes(o)); fillOrders(); renderOrders(); toast('VIP-покупатель не дождался и ушёл'); changed = true; }
+  // подсказка: после 8 секунд без действий покачиваются два одинаковых предмета
+  if (!hintPair && Date.now() - lastAction > 8000 && $('modalBack').hidden) {
+    for (let a = 0; a < S.board.length && !hintPair; a++) {
+      if (!S.board[a] || locked(a)) continue;
+      const b = S.board.findIndex((it, k) => k !== a && !locked(k) && canMerge(S.board[a], it));
+      if (b >= 0) hintPair = [a, b];
+    }
+    if (hintPair) renderBoard();
+  }
+  const placed = placeGenerators();
+  if (placed.length) { changed = true; toast(`Появился ${placed.join(', ')}`); }
+  if (changed) { save(); renderBoard(); }
+  renderTop();
+}, 1000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) cloudSave(); });
+
+/* ---------- Запуск ---------- */
+S.boosters = Object.assign({ dust: 0, mirror: 0, broom: 0 }, S.boosters);
+S.settings = Object.assign({ sound: true, music: true, haptic: true }, S.settings);
+S.decor = S.decor || {}; S.ach = S.ach || {}; S.login = S.login || { last: '', streak: 0, claimed: true };
+document.addEventListener('pointerdown', startMusic, { once: true });
+fillOrders(); save(); renderAll();
+cloudLoad();
+if (S.tut >= 3) setTimeout(checkLogin, 600);   // новичку календарь покажем после обучения
+</script>
+</body>
+</html>
